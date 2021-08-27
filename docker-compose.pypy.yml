@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  raft-pypy:
+    build:
+      context: .
+      args:
+        - IMAGE_NAME=${PYPY_IMAGE_NAME}
+        - IMAGE_VERSION=${PYPY_IMAGE_VERSION}
+    image: lycantropos/raft-pypy:0.0.0
+    volumes:
+      - ./pytest.ini:/opt/raft/pytest.ini
+      - ./raft:/opt/raft/raft
+      - ./README.md:/opt/raft/README.md
+      - ./requirements-tests.txt:/opt/raft/requirements-tests.txt
+      - ./requirements.txt:/opt/raft/requirements.txt
+      - ./setup.py:/opt/raft/setup.py
+      - ./tests:/opt/raft/tests
+    entrypoint: pytest
