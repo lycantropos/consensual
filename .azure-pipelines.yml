@@ -8,10 +8,6 @@ trigger:
 
 strategy:
   matrix:
-    MacOs CPython3.5:
-      image: 'macos-latest'
-      python.version: '3.5'
-      python.architecture: 'x64'
     MacOs CPython3.6:
       image: 'macos-latest'
       python.version: '3.6'
@@ -32,10 +28,6 @@ strategy:
       image: 'macos-latest'
       python.version: 'pypy3'
       python.architecture: 'x64'
-    Ubuntu CPython3.5:
-      image: 'ubuntu-latest'
-      python.version: '3.5'
-      python.architecture: 'x64'
     Ubuntu CPython3.6:
       image: 'ubuntu-latest'
       python.version: '3.6'
@@ -55,14 +47,6 @@ strategy:
     Ubuntu PyPy3:
       image: 'ubuntu-latest'
       python.version: 'pypy3'
-      python.architecture: 'x64'
-    Windows CPython3.5 (x86):
-      image: 'windows-latest'
-      python.version: '3.5'
-      python.architecture: 'x86'
-    Windows CPython3.5 (x64):
-      image: 'windows-latest'
-      python.version: '3.5'
       python.architecture: 'x64'
     Windows CPython3.6 (x86):
       image: 'windows-latest'
