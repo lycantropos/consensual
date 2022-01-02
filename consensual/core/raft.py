@@ -31,7 +31,7 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-MIN_DURATION = 0.25
+MIN_DURATION = 0.5
 assert MIN_DURATION < 1, 'MIN_DURATION should be less than minimum nodes count'
 
 NodeId = str
