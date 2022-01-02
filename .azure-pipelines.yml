@@ -8,10 +8,6 @@ trigger:
 
 strategy:
   matrix:
-    MacOs CPython3.6:
-      image: 'macos-latest'
-      python.version: '3.6'
-      python.architecture: 'x64'
     MacOs CPython3.7:
       image: 'macos-latest'
       python.version: '3.7'
