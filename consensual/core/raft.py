@@ -239,9 +239,7 @@ class Node:
         await self._process_vote_reply(reply)
 
     async def _connect(self) -> None:
-        done, pending = await asyncio.wait(self._senders.values())
-        for task in pending:
-            task.cancel()
+        await asyncio.gather(*self._senders.values())
 
     async def _handle(self, request: web.Request) -> web_ws.WebSocketResponse:
         websocket = web_ws.WebSocketResponse()
