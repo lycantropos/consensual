@@ -149,30 +149,30 @@ class Node:
                  routes: Dict[str, Route],
                  term: Term = 0,
                  voted_for: Optional[NodeId] = None) -> None:
+        self._id = id_
+        self._urls = urls
+        self._log = [] if log is None else log
+        self._logger = logging.getLogger() if logger is None else logger
+        self._loop = get_event_loop()
+        self._routes = routes
+        self._term = term
+        self._voted_for = voted_for
         self._acknowledged_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._app = web.Application()
         self._calls = {node_id: asyncio.Queue() for node_id in self.nodes_ids}
         self._commit_length = 0
         self._election_duration = 0
         self._election_task = self._loop.create_future()
-        self._id = id_
         self._leader, self._role = None, Role.FOLLOWER
-        self._log = [] if log is None else log
         self._log_tasks = []
-        self._logger = logging.getLogger() if logger is None else logger
-        self._loop = get_event_loop()
         self._session = ClientSession(loop=self._loop)
         self._reelection_task = self._loop.create_future()
-        self._term = term
         self._replies = {node_id: {path: asyncio.Queue() for path in Path}
                          for node_id in self.nodes_ids}
-        self._routes = routes
         self._senders = {node_id: self._sender(node_id)
                          for node_id in self.nodes_ids}
         self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._sync_task = self._loop.create_future()
-        self._urls = urls
-        self._voted_for = voted_for
         self._votes = set()
         self._app.router.add_post('/', self._handle)
         for path in self.routes.keys():
