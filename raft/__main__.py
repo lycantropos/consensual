@@ -18,8 +18,6 @@ from typing import (Any,
 
 import dataclasses
 
-Route = Callable[['Node', Any], Awaitable[Any]]
-
 try:
     from typing import Protocol
 except ImportError:
@@ -40,7 +38,7 @@ MIN_DURATION = 0.5
 assert MIN_DURATION < 1, 'MIN_DURATION should be less than minimum nodes count'
 
 NodeId = str
-
+Route = Callable[['Node', Any], Awaitable[Any]]
 Term = int
 
 
