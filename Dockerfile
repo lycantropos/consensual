@@ -5,7 +5,7 @@ FROM ${IMAGE_NAME}:${IMAGE_VERSION}
 
 RUN pip install --upgrade pip setuptools
 
-WORKDIR /opt/raft
+WORKDIR /opt/consensual
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
@@ -16,5 +16,5 @@ RUN pip install -r requirements-tests.txt
 COPY README.md .
 COPY pytest.ini .
 COPY setup.py .
-COPY raft raft
+COPY consensual consensual
 COPY tests tests

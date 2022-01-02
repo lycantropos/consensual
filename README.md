@@ -1,10 +1,10 @@
-raft
-====
+consensual
+==========
 
-[![](https://dev.azure.com/lycantropos/raft/_apis/build/status/lycantropos.raft?branchName=master)](https://dev.azure.com/lycantropos/raft/_build/latest?branchName=master "Azure Pipelines")
-[![](https://codecov.io/gh/lycantropos/raft/branch/master/graph/badge.svg)](https://codecov.io/gh/lycantropos/raft "Codecov")
-[![](https://img.shields.io/github/license/lycantropos/raft.svg)](https://github.com/lycantropos/raft/blob/master/LICENSE "License")
-[![](https://badge.fury.io/py/raft.svg)](https://badge.fury.io/py/raft "PyPI")
+[![](https://dev.azure.com/lycantropos/consensual/_apis/build/status/lycantropos.consensual?branchName=master)](https://dev.azure.com/lycantropos/consensual/_build/latest?branchName=master "Azure Pipelines")
+[![](https://codecov.io/gh/lycantropos/consensual/branch/master/graph/badge.svg)](https://codecov.io/gh/lycantropos/consensual "Codecov")
+[![](https://img.shields.io/github/license/lycantropos/consensual.svg)](https://github.com/lycantropos/consensual/blob/master/LICENSE "License")
+[![](https://badge.fury.io/py/consensual.svg)](https://badge.fury.io/py/consensual "PyPI")
 
 In what follows `python` is an alias for `python3.5` or `pypy3.5`
 or any later version (`python3.6`, `pypy3.6` and so on).
@@ -21,15 +21,15 @@ python -m pip install --upgrade pip setuptools
 
 Download and install the latest stable version from `PyPI` repository
 ```bash
-python -m pip install --upgrade raft
+python -m pip install --upgrade consensual
 ```
 
 ### Developer
 
 Download the latest version from `GitHub` repository
 ```bash
-git clone https://github.com/lycantropos/raft.git
-cd raft
+git clone https://github.com/lycantropos/consensual.git
+cd consensual
 ```
 
 Install dependencies

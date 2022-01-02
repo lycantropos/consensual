@@ -3,14 +3,14 @@ from pathlib import Path
 from setuptools import (find_packages,
                         setup)
 
-import raft
+import consensual
 
-project_base_url = 'https://github.com/lycantropos/raft/'
+project_base_url = 'https://github.com/lycantropos/consensual/'
 
-setup(name=raft.__name__,
+setup(name=consensual.__name__,
       packages=find_packages(exclude=('tests', 'tests.*')),
-      version=raft.__version__,
-      description=raft.__doc__,
+      version=consensual.__version__,
+      description=consensual.__doc__,
       long_description=Path('README.md').read_text(encoding='utf-8'),
       long_description_content_type='text/markdown',
       author='Azat Ibrakov',
