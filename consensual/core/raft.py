@@ -1,7 +1,6 @@
 import asyncio
 import dataclasses
 import enum
-import json
 import logging.config
 import random
 import traceback
@@ -251,7 +250,7 @@ class Node:
                   Path.VOTE: (VoteCall, self._process_vote_call)}
         async for message in websocket:
             message: web_ws.WSMessage
-            raw_call = json.loads(message.data)
+            raw_call = message.json()
             call_cls, processor = routes[Path(raw_call['path'])]
             call = call_cls(**raw_call['data'])
             reply = await processor(call)
