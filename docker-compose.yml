@@ -1,13 +1,13 @@
 version: '3'
 
 services:
-  consensual-pypy:
+  consensual:
     build:
       context: .
       args:
-        - IMAGE_NAME=${PYPY_IMAGE_NAME}
-        - IMAGE_VERSION=${PYPY_IMAGE_VERSION}
-    image: lycantropos/consensual-pypy:0.0.0
+        - IMAGE_NAME=${IMAGE_NAME}
+        - IMAGE_VERSION=${IMAGE_VERSION}
+    image: lycantropos/consensual:0.0.0
     volumes:
       - ./pytest.ini:/opt/consensual/pytest.ini
       - ./consensual:/opt/consensual/consensual
