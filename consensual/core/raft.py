@@ -31,7 +31,9 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-MIN_DURATION = 0.5
+MIN_DURATION = 0.25
+assert MIN_DURATION < 1, 'MIN_DURATION should be less than minimum nodes count'
+
 NodeId = str
 Route = Callable[['Node', Any], Awaitable[Any]]
 Term = int
