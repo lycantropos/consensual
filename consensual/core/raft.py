@@ -151,8 +151,8 @@ class Node:
                  routes: Dict[str, Route],
                  term: Term = 0,
                  voted_for: Optional[NodeId] = None) -> None:
-        self._id = id_
         self._heartbeat = heartbeat
+        self._id = id_
         self._log = [] if log is None else log
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
