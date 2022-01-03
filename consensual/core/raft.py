@@ -30,8 +30,7 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-MIN_DURATION = 0.5
-assert MIN_DURATION < 1, 'MIN_DURATION should be less than minimum nodes count'
+MIN_DURATION = 1
 
 NodeId = str
 Route = Callable[['Node', Any], Awaitable[Any]]
@@ -135,28 +134,32 @@ _T = TypeVar('_T')
 
 class Node:
     __slots__ = ('_acknowledged_lengths', '_app', '_calls', '_commit_length',
-                 '_election_duration', '_election_task', '_id', '_leader',
-                 '_log', '_log_tasks', '_logger', '_loop', '_reelection_task',
-                 '_replies', '_role', '_routes', '_senders', '_sent_lengths',
-                 '_session', '_sync_task', '_term', '_urls', '_voted_for',
-                 '_votes')
+                 '_election_duration', '_election_task', '_heartbeat', '_id',
+                 '_leader', '_log', '_log_tasks', '_logger', '_loop',
+                 '_reelection_task', '_replies', '_role', '_routes',
+                 '_senders', '_sent_lengths', '_session', '_sync_task',
+                 '_term', '_max_heartbeat_timeout', '_urls', '_voted_for', '_votes')
 
     def __init__(self,
                  id_: NodeId,
                  urls: Mapping[NodeId, URL],
                  *,
+                 heartbeat: int = MIN_DURATION,
                  log: Optional[List[Record]] = None,
                  logger: Optional[logging.Logger] = None,
+                 max_heartbeat_timeout: int = MIN_DURATION,
                  routes: Dict[str, Route],
                  term: Term = 0,
                  voted_for: Optional[NodeId] = None) -> None:
         self._id = id_
-        self._urls = urls
+        self._heartbeat = heartbeat
         self._log = [] if log is None else log
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
+        self._max_heartbeat_timeout = max_heartbeat_timeout
         self._routes = routes
         self._term = term
+        self._urls = urls
         self._voted_for = voted_for
         self._acknowledged_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._app = web.Application()
@@ -183,6 +186,10 @@ class Node:
                              field_seeker=seekers.complex_)
 
     @property
+    def heartbeat(self) -> int:
+        return self._heartbeat
+
+    @property
     def id(self) -> NodeId:
         return self._id
 
@@ -201,6 +208,10 @@ class Node:
     @property
     def majority_count(self) -> int:
         return ceil_division(self.nodes_count + 1, 2)
+
+    @property
+    def max_heartbeat_timeout(self) -> int:
+        return self._max_heartbeat_timeout
 
     @property
     def nodes_count(self) -> int:
@@ -446,8 +457,9 @@ class Node:
 
     async def _sync_followers(self) -> None:
         while self._role is Role.LEADER:
+            start = self._loop.time()
             await self._sync_followers_once()
-            await asyncio.sleep(MIN_DURATION)
+            await asyncio.sleep(self.heartbeat - (self._loop.time() - start))
 
     async def _sync_followers_once(self) -> None:
         await asyncio.gather(*[self._sync_follower(node_id)
@@ -529,7 +541,7 @@ class Node:
         self._sync_task = self._loop.create_task(self._sync_followers())
 
     def _to_new_duration(self) -> float:
-        return random.uniform(MIN_DURATION, self.nodes_count)
+        return random.uniform(self.heartbeat, self.heartbeat + self.max_heartbeat_timeout)
 
     def _update_commit_length(self, commit_length: int) -> None:
         if commit_length > self._commit_length:
