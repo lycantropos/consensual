@@ -460,8 +460,6 @@ class Node:
                 self.logger.warning(f'{self.id} failed '
                                     f'to establish connection with {to}')
                 timeout = min(max_timeout, timeout * factor)
-                connection_end = self._loop.time()
-                latencies.append(connection_end - connection_start)
                 await asyncio.sleep(timeout)
                 continue
 
