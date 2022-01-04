@@ -165,7 +165,8 @@ class Node:
         self._commit_length = 0
         self._election_duration = 0
         self._election_task = self._loop.create_future()
-        self._latencies: Dict[NodeId, deque] = {node_id: deque(maxlen=10)
+        self._latencies: Dict[NodeId, deque] = {node_id: deque([0],
+                                                               maxlen=10)
                                                 for node_id in self.nodes_ids}
         self._leader, self._role = None, Role.FOLLOWER
         self._log_tasks = []
@@ -437,15 +438,13 @@ class Node:
         calls, replies, latencies = (self._calls[to], self._replies[to],
                                      self._latencies[to])
         while True:
-            connection_start = self._loop.time()
             try:
                 async with self._session.ws_connect(
                         url,
                         method=hdrs.METH_POST,
-                        timeout=None,
-                        headers={'NodeId': self.id}) as connection:
-                    connection_end = self._loop.time()
-                    latencies.append(connection_end - connection_start)
+                        timeout=self.heartbeat,
+                        headers={'NodeId': self.id},
+                        heartbeat=self.heartbeat) as connection:
                     while True:
                         path, call = await calls.get()
                         call_start = self._loop.time()
@@ -473,9 +472,7 @@ class Node:
             await asyncio.sleep(self.heartbeat - self._to_max_latency())
 
     def _to_max_latency(self) -> float:
-        return sum(max(latencies,
-                       default=0)
-                   for latencies in self._latencies.values())
+        return sum(max(latencies) for latencies in self._latencies.values())
 
     async def _sync_followers_once(self) -> None:
         await asyncio.gather(*[self._sync_follower(node_id)
@@ -564,7 +561,11 @@ class Node:
         self._sync_task = self._loop.create_task(self._sync_followers())
 
     def _to_new_duration(self) -> float:
-        return self.heartbeat + 10 * self._to_max_latency()
+        return (self.heartbeat
+                + 10 * (self._to_max_latency()
+                        if self._role is Role.LEADER
+                        else (self._leader is not None
+                              and max(self._latencies[self._leader]))))
 
     def _update_commit_length(self, commit_length: int) -> None:
         if commit_length > self._commit_length:
