@@ -2,9 +2,9 @@ import asyncio
 import dataclasses
 import enum
 import logging.config
-import random
 import traceback
 from asyncio import get_event_loop
+from collections import deque
 from typing import (Any,
                     Awaitable,
                     Callable,
@@ -30,7 +30,7 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-MIN_DURATION = 1
+MIN_DURATION = 5
 
 NodeId = str
 Route = Callable[['Node', Any], Awaitable[Any]]
@@ -135,10 +135,10 @@ _T = TypeVar('_T')
 class Node:
     __slots__ = ('_acknowledged_lengths', '_app', '_calls', '_commit_length',
                  '_election_duration', '_election_task', '_heartbeat', '_id',
-                 '_leader', '_log', '_log_tasks', '_logger', '_loop',
-                 '_reelection_task', '_replies', '_role', '_routes',
-                 '_senders', '_sent_lengths', '_session', '_sync_task',
-                 '_term', '_max_heartbeat_timeout', '_urls', '_voted_for', '_votes')
+                 '_latencies', '_leader', '_log', '_log_tasks', '_logger',
+                 '_loop', '_reelection_lag', '_reelection_task', '_replies',
+                 '_role', '_routes', '_senders', '_sent_lengths', '_session',
+                 '_sync_task', '_term', '_urls', '_voted_for', '_votes')
 
     def __init__(self,
                  id_: NodeId,
@@ -147,7 +147,6 @@ class Node:
                  heartbeat: int = MIN_DURATION,
                  log: Optional[List[Record]] = None,
                  logger: Optional[logging.Logger] = None,
-                 max_heartbeat_timeout: int = MIN_DURATION,
                  routes: Dict[str, Route],
                  term: Term = 0,
                  voted_for: Optional[NodeId] = None) -> None:
@@ -156,7 +155,6 @@ class Node:
         self._log = [] if log is None else log
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
-        self._max_heartbeat_timeout = max_heartbeat_timeout
         self._routes = routes
         self._term = term
         self._urls = urls
@@ -167,15 +165,18 @@ class Node:
         self._commit_length = 0
         self._election_duration = 0
         self._election_task = self._loop.create_future()
+        self._latencies: Dict[NodeId, deque] = {node_id: deque(maxlen=10)
+                                                for node_id in self.nodes_ids}
         self._leader, self._role = None, Role.FOLLOWER
         self._log_tasks = []
-        self._session = ClientSession(loop=self._loop)
+        self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._replies = {node_id: {path: asyncio.Queue() for path in Path}
                          for node_id in self.nodes_ids}
         self._senders = {node_id: self._sender(node_id)
                          for node_id in self.nodes_ids}
         self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
+        self._session = ClientSession(loop=self._loop)
         self._sync_task = self._loop.create_future()
         self._votes = set()
         self._app.router.add_post('/', self._handle)
@@ -208,10 +209,6 @@ class Node:
     @property
     def majority_count(self) -> int:
         return ceil_division(self.nodes_count + 1, 2)
-
-    @property
-    def max_heartbeat_timeout(self) -> int:
-        return self._max_heartbeat_timeout
 
     @property
     def nodes_count(self) -> int:
@@ -259,6 +256,8 @@ class Node:
         routes = {Path.LOG: (LogCall, self._process_log_call),
                   Path.SYNC: (SyncCall.from_json, self._process_sync_call),
                   Path.VOTE: (VoteCall, self._process_vote_call)}
+        latencies = self._latencies[request.headers['NodeId']]
+        call_start = self._loop.time()
         async for message in websocket:
             message: web_ws.WSMessage
             raw_call = message.json()
@@ -266,6 +265,9 @@ class Node:
             call = call_cls(**raw_call['data'])
             reply = await processor(call)
             await websocket.send_json(reply.as_json())
+            reply_end = self._loop.time()
+            latencies.append(reply_end - call_start)
+            call_start = self._loop.time()
         return websocket
 
     async def _handle_route(self, request: web.Request) -> web.Response:
@@ -307,6 +309,7 @@ class Node:
             else:
                 return LogReply(error=None)
         else:
+            assert self._role is not Role.CANDIDATE
             raw_reply = await self._send_call(self._leader, Path.LOG, call)
             return LogReply(**raw_reply)
 
@@ -431,23 +434,34 @@ class Node:
                       factor: int = 2,
                       max_timeout: int = 60) -> None:
         url = self.urls[to]
-        calls = self._calls[to]
+        calls, replies, latencies = (self._calls[to], self._replies[to],
+                                     self._latencies[to])
         while True:
+            connection_start = self._loop.time()
             try:
                 async with self._session.ws_connect(
                         url,
                         method=hdrs.METH_POST,
-                        timeout=None) as connection:
+                        timeout=None,
+                        headers={'NodeId': self.id}) as connection:
+                    connection_end = self._loop.time()
+                    latencies.append(connection_end - connection_start)
                     while True:
                         path, call = await calls.get()
+                        call_start = self._loop.time()
                         await connection.send_json({'path': path,
                                                     'data': call.as_json()})
                         reply = await connection.receive_json()
-                        self._replies[to][path].put_nowait(reply)
+                        reply_end = self._loop.time()
+                        latency = reply_end - call_start
+                        latencies.append(latency)
+                        replies[path].put_nowait(reply)
             except ClientConnectionError:
                 self.logger.warning(f'{self.id} failed '
                                     f'to establish connection with {to}')
                 timeout = min(max_timeout, timeout * factor)
+                connection_end = self._loop.time()
+                latencies.append(connection_end - connection_start)
                 await asyncio.sleep(timeout)
                 continue
 
@@ -457,9 +471,13 @@ class Node:
 
     async def _sync_followers(self) -> None:
         while self._role is Role.LEADER:
-            start = self._loop.time()
             await self._sync_followers_once()
-            await asyncio.sleep(self.heartbeat - (self._loop.time() - start))
+            await asyncio.sleep(self.heartbeat - self._to_max_latency())
+
+    def _to_max_latency(self) -> float:
+        return sum(max(latencies,
+                       default=0)
+                   for latencies in self._latencies.values())
 
     async def _sync_followers_once(self) -> None:
         await asyncio.gather(*[self._sync_follower(node_id)
@@ -521,6 +539,12 @@ class Node:
         self._start_sync_timer()
 
     def _restart_election_timer(self) -> None:
+        self.logger.debug(f'{self.id} restarts election timer '
+                          f'after {self._reelection_lag}'
+                          + (''
+                             if self._leader is None
+                             else f' with {self._latencies[self._leader]} '
+                                  f'leader latencies'))
         self._cancel_election_timer()
         self._start_election_timer()
 
@@ -534,14 +558,15 @@ class Node:
         self._election_task.add_done_callback(self._election_timer_callback)
 
     def _start_reelection_timer(self) -> None:
+        self._reelection_lag = self._to_new_duration()
         self._reelection_task = self._loop.call_later(
-                self._to_new_duration(), self._restart_election_timer)
+                self._reelection_lag, self._restart_election_timer)
 
     def _start_sync_timer(self) -> None:
         self._sync_task = self._loop.create_task(self._sync_followers())
 
     def _to_new_duration(self) -> float:
-        return random.uniform(self.heartbeat, self.heartbeat + self.max_heartbeat_timeout)
+        return self.heartbeat + 10 * self._to_max_latency()
 
     def _update_commit_length(self, commit_length: int) -> None:
         if commit_length > self._commit_length:
