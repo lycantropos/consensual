@@ -466,11 +466,6 @@ class Node:
         result = await self._results[to][path].get()
         return result.value
 
-    async def _connect_with(self,
-                            node_id: NodeId,
-                            **kwargs: Any) -> ClientWebSocketResponse:
-        return await self._session.ws_connect(self.urls[node_id], **kwargs)
-
     async def _sender(self, to: NodeId) -> None:
         url = self.urls[to]
         calls, results, latencies = (self._calls[to], self._results[to],
