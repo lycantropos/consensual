@@ -13,6 +13,7 @@ from typing import (Any,
                     Dict,
                     List,
                     Mapping,
+                    NoReturn,
                     Optional,
                     TypeVar)
 
@@ -134,13 +135,36 @@ class VoteReply:
 _T = TypeVar('_T')
 
 
+class _Result(Protocol[_T]):
+    @property
+    def value(self) -> _T:
+        """Returns value if any or raises exception."""
+
+
+class _Ok:
+    def __init__(self, value: _T) -> None:
+        self._value = value
+
+    def value(self) -> _T:
+        return self._value
+
+
+class _Error:
+    def __init__(self, exception: Exception) -> None:
+        self.exception = exception
+
+    @property
+    def value(self) -> NoReturn:
+        raise self.exception
+
+
 class Node:
     __slots__ = ('_acknowledged_lengths', '_app', '_calls', '_commit_length',
                  '_election_duration', '_election_task', '_heartbeat', '_id',
                  '_latencies', '_leader', '_log', '_log_tasks', '_logger',
-                 '_loop', '_reelection_lag', '_reelection_task', '_replies',
-                 '_role', '_routes', '_sent_lengths', '_session', '_sync_task',
-                 '_term', '_urls', '_voted_for', '_votes')
+                 '_loop', '_reelection_lag', '_reelection_task', '_results',
+                 '_role', '_routes', '_senders', '_sent_lengths', '_session',
+                 '_sync_task', '_term', '_urls', '_voted_for', '_votes')
 
     def __init__(self,
                  id_: NodeId,
@@ -174,7 +198,9 @@ class Node:
         self._log_tasks = []
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
-        self._replies = {node_id: {path: asyncio.Queue() for path in Path}
+        self._results = {node_id: {path: asyncio.Queue() for path in Path}
+                         for node_id in self.nodes_ids}
+        self._senders = {node_id: self._sender(node_id)
                          for node_id in self.nodes_ids}
         self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._session = ClientSession(loop=self._loop)
@@ -236,6 +262,7 @@ class Node:
         return self._voted_for
 
     def run(self) -> None:
+        self._loop.create_task(self._connect())
         self._start_reelection_timer()
         url = self.urls[self.id]
         web.run_app(self._app,
@@ -246,6 +273,9 @@ class Node:
     async def _agitate_voter(self, node_id: NodeId) -> None:
         reply = await self._call_vote(node_id)
         await self._process_vote_reply(reply)
+
+    async def _connect(self) -> None:
+        await asyncio.gather(*self._senders.values())
 
     async def _handle(self, request: web.Request) -> web_ws.WebSocketResponse:
         websocket = web_ws.WebSocketResponse()
@@ -309,16 +339,16 @@ class Node:
                 self.log.append(Record(call.data, self.term))
                 await self._sync_followers_once()
                 assert self._acknowledged_lengths[self.id] == len(self.log)
-            except Exception as error:
-                return LogReply(error=format_exception(error))
+            except Exception as exception:
+                return LogReply(error=format_exception(exception))
             else:
                 return LogReply(error=None)
         else:
             assert self._role is not Role.CANDIDATE
             try:
                 raw_reply = await self._send_call(self._leader, Path.LOG, call)
-            except (ClientConnectionError, OSError) as error:
-                return LogReply(error=format_exception(error))
+            except (ClientConnectionError, OSError) as exception:
+                return LogReply(error=format_exception(exception))
             else:
                 return LogReply(**raw_reply)
 
@@ -433,23 +463,41 @@ class Node:
                          to: NodeId,
                          path: Path,
                          call: Call) -> Dict[str, Any]:
-        connection: ClientWebSocketResponse = await self._connect_with(
-                to,
-                method=hdrs.METH_POST,
-                timeout=self.heartbeat,
-                headers={'NodeId': self.id})
-        call_start = self._to_time()
-        await connection.send_json({'path': path,
-                                    'data': call.as_json()})
-        reply = await connection.receive_json()
-        reply_end = self._to_time()
-        self._latencies[to].append(reply_end - call_start)
-        return reply
+        self._calls[to].put_nowait((path, call))
+        result = await self._results[to][path].get()
+        return result.value()
 
     async def _connect_with(self,
                             node_id: NodeId,
                             **kwargs: Any) -> ClientWebSocketResponse:
         return await self._session.ws_connect(self.urls[node_id], **kwargs)
+
+    async def _sender(self, to: NodeId) -> None:
+        url = self.urls[to]
+        calls, results, latencies = (self._calls[to], self._results[to],
+                                     self._latencies[to])
+        path, call = await calls.get()
+        while True:
+            try:
+                async with self._session.ws_connect(
+                        url,
+                        method=hdrs.METH_POST,
+                        timeout=self.heartbeat,
+                        headers={'NodeId': self.id},
+                        heartbeat=self.heartbeat) as connection:
+                    while True:
+                        call_start = self._loop.time()
+                        await connection.send_json({'path': path,
+                                                    'data': call.as_json()})
+                        reply = await connection.receive_json()
+                        reply_end = self._loop.time()
+                        latency = reply_end - call_start
+                        latencies.append(latency)
+                        results[path].put_nowait(_Ok(reply))
+                        path, call = await calls.get()
+            except (ClientConnectionError, OSError) as exception:
+                results[path].put_nowait(_Error(exception))
+                path, call = await calls.get()
 
     async def _sync_follower(self, node_id: NodeId) -> None:
         reply = await self._call_sync(node_id)
