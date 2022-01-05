@@ -333,14 +333,10 @@ class Node:
     async def _process_log_call(self, call: LogCall) -> LogReply:
         assert self._leader is not None
         if self._role is Role.LEADER:
-            try:
-                self.log.append(Record(call.data, self.term))
-                await self._sync_followers_once()
-                assert self._acknowledged_lengths[self.id] == len(self.log)
-            except Exception as exception:
-                return LogReply(error=format_exception(exception))
-            else:
-                return LogReply(error=None)
+            self.log.append(Record(call.data, self.term))
+            await self._sync_followers_once()
+            assert self._acknowledged_lengths[self.id] == len(self.log)
+            return LogReply(error=None)
         else:
             assert self._role is Role.FOLLOWER
             try:
