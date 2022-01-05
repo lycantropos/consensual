@@ -145,6 +145,7 @@ class _Ok:
     def __init__(self, value: _T) -> None:
         self._value = value
 
+    @property
     def value(self) -> _T:
         return self._value
 
@@ -465,7 +466,7 @@ class Node:
                          call: Call) -> Dict[str, Any]:
         self._calls[to].put_nowait((path, call))
         result = await self._results[to][path].get()
-        return result.value()
+        return result.value
 
     async def _connect_with(self,
                             node_id: NodeId,
