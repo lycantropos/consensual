@@ -136,23 +136,21 @@ _T = TypeVar('_T')
 
 
 class _Result(Protocol[_T]):
-    @property
-    def value(self) -> _T:
-        """Returns value if any or raises exception."""
+    value: _T
 
 
 class _Ok:
     def __init__(self, value: _T) -> None:
-        self._value = value
+        self.value = value
 
-    @property
-    def value(self) -> _T:
-        return self._value
+    __repr__ = generate_repr(__init__)
 
 
 class _Error:
     def __init__(self, exception: Exception) -> None:
         self.exception = exception
+
+    __repr__ = generate_repr(__init__)
 
     @property
     def value(self) -> NoReturn:
