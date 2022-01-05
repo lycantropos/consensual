@@ -23,9 +23,8 @@ except ImportError:
     from typing_extensions import Protocol
 
 import async_timeout
-from aiohttp import (ClientConnectionError,
+from aiohttp import (ClientError,
                      ClientSession,
-                     ClientWebSocketResponse,
                      hdrs,
                      web,
                      web_ws)
@@ -309,7 +308,7 @@ class Node:
                         suffix=self.log[prefix_length:])
         try:
             raw_reply = await self._send_call(node_id, Path.SYNC, call)
-        except (ClientConnectionError, OSError):
+        except (ClientError, OSError):
             return SyncReply(node_id=node_id,
                              term=self.term,
                              acknowledged_length=0,
@@ -324,7 +323,7 @@ class Node:
                         log_term=self.log_term)
         try:
             raw_reply = await self._send_call(node_id, Path.VOTE, call)
-        except (ClientConnectionError, OSError):
+        except (ClientError, OSError):
             return VoteReply(node_id=node_id,
                              term=self.term,
                              supports=False)
@@ -343,10 +342,10 @@ class Node:
             else:
                 return LogReply(error=None)
         else:
-            assert self._role is not Role.CANDIDATE
+            assert self._role is Role.FOLLOWER
             try:
                 raw_reply = await self._send_call(self._leader, Path.LOG, call)
-            except (ClientConnectionError, OSError) as exception:
+            except (ClientError, OSError) as exception:
                 return LogReply(error=format_exception(exception))
             else:
                 return LogReply(**raw_reply)
@@ -479,17 +478,20 @@ class Node:
                         timeout=self.heartbeat,
                         headers={'NodeId': self.id},
                         heartbeat=self.heartbeat) as connection:
-                    while True:
-                        call_start = self._loop.time()
-                        await connection.send_json({'path': path,
-                                                    'data': call.as_json()})
-                        reply = await connection.receive_json()
+                    call_start = self._loop.time()
+                    await connection.send_json({'path': path,
+                                                'data': call.as_json()})
+                    async for reply in connection:
+                        reply: web_ws.WSMessage
                         reply_end = self._loop.time()
                         latency = reply_end - call_start
                         latencies.append(latency)
-                        results[path].put_nowait(_Ok(reply))
+                        results[path].put_nowait(_Ok(reply.json()))
                         path, call = await calls.get()
-            except (ClientConnectionError, OSError) as exception:
+                        call_start = self._loop.time()
+                        await connection.send_json({'path': path,
+                                                    'data': call.as_json()})
+            except (ClientError, OSError) as exception:
                 results[path].put_nowait(_Error(exception))
                 path, call = await calls.get()
 
