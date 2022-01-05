@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import enum
 import logging.config
+import random
 import traceback
 from asyncio import get_event_loop
 from collections import deque
@@ -23,6 +24,7 @@ except ImportError:
 import async_timeout
 from aiohttp import (ClientConnectionError,
                      ClientSession,
+                     ClientWebSocketResponse,
                      hdrs,
                      web,
                      web_ws)
@@ -137,8 +139,8 @@ class Node:
                  '_election_duration', '_election_task', '_heartbeat', '_id',
                  '_latencies', '_leader', '_log', '_log_tasks', '_logger',
                  '_loop', '_reelection_lag', '_reelection_task', '_replies',
-                 '_role', '_routes', '_senders', '_sent_lengths', '_session',
-                 '_sync_task', '_term', '_urls', '_voted_for', '_votes')
+                 '_role', '_routes', '_sent_lengths', '_session', '_sync_task',
+                 '_term', '_urls', '_voted_for', '_votes')
 
     def __init__(self,
                  id_: NodeId,
@@ -173,8 +175,6 @@ class Node:
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._replies = {node_id: {path: asyncio.Queue() for path in Path}
-                         for node_id in self.nodes_ids}
-        self._senders = {node_id: self._sender(node_id)
                          for node_id in self.nodes_ids}
         self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._session = ClientSession(loop=self._loop)
@@ -236,7 +236,6 @@ class Node:
         return self._voted_for
 
     def run(self) -> None:
-        self._loop.create_task(self._connect())
         self._start_reelection_timer()
         url = self.urls[self.id]
         web.run_app(self._app,
@@ -248,17 +247,12 @@ class Node:
         reply = await self._call_vote(node_id)
         await self._process_vote_reply(reply)
 
-    async def _connect(self) -> None:
-        await asyncio.gather(*self._senders.values())
-
     async def _handle(self, request: web.Request) -> web_ws.WebSocketResponse:
         websocket = web_ws.WebSocketResponse()
         await websocket.prepare(request)
         routes = {Path.LOG: (LogCall, self._process_log_call),
                   Path.SYNC: (SyncCall.from_json, self._process_sync_call),
                   Path.VOTE: (VoteCall, self._process_vote_call)}
-        latencies = self._latencies[request.headers['NodeId']]
-        call_start = self._loop.time()
         async for message in websocket:
             message: web_ws.WSMessage
             raw_call = message.json()
@@ -266,9 +260,6 @@ class Node:
             call = call_cls(**raw_call['data'])
             reply = await processor(call)
             await websocket.send_json(reply.as_json())
-            reply_end = self._loop.time()
-            latencies.append(reply_end - call_start)
-            call_start = self._loop.time()
         return websocket
 
     async def _handle_route(self, request: web.Request) -> web.Response:
@@ -287,16 +278,29 @@ class Node:
                                      else 0),
                         commit_length=self._commit_length,
                         suffix=self.log[prefix_length:])
-        raw_reply = await self._send_call(node_id, Path.SYNC, call)
-        return SyncReply(**raw_reply)
+        try:
+            raw_reply = await self._send_call(node_id, Path.SYNC, call)
+        except (ClientConnectionError, OSError):
+            return SyncReply(node_id=node_id,
+                             term=self.term,
+                             acknowledged_length=0,
+                             successful=False)
+        else:
+            return SyncReply(**raw_reply)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
         call = VoteCall(node_id=self.id,
                         term=self.term,
                         log_length=len(self.log),
                         log_term=self.log_term)
-        raw_reply = await self._send_call(node_id, Path.VOTE, call)
-        return VoteReply(**raw_reply)
+        try:
+            raw_reply = await self._send_call(node_id, Path.VOTE, call)
+        except (ClientConnectionError, OSError):
+            return VoteReply(node_id=node_id,
+                             term=self.term,
+                             supports=False)
+        else:
+            return VoteReply(**raw_reply)
 
     async def _process_log_call(self, call: LogCall) -> LogReply:
         assert self._leader is not None
@@ -311,8 +315,12 @@ class Node:
                 return LogReply(error=None)
         else:
             assert self._role is not Role.CANDIDATE
-            raw_reply = await self._send_call(self._leader, Path.LOG, call)
-            return LogReply(**raw_reply)
+            try:
+                raw_reply = await self._send_call(self._leader, Path.LOG, call)
+            except (ClientConnectionError, OSError) as error:
+                return LogReply(error=format_exception(error))
+            else:
+                return LogReply(**raw_reply)
 
     async def _process_record(self, record: Record) -> None:
         self.logger.debug(f'{self.id} processes {record} '
@@ -409,13 +417,13 @@ class Node:
         self._voted_for = None
         self._votes.clear()
         self.logger.debug(f'{self.id} runs election for term {self.term}')
-        start = self._loop.time()
+        start = self._to_time()
         try:
             async with async_timeout.timeout(self._election_duration):
                 await asyncio.gather(*[self._agitate_voter(node_id)
                                        for node_id in self.nodes_ids])
         finally:
-            end = self._loop.time()
+            end = self._to_time()
             self.logger.debug(f'{self.id} election for term {self.term} '
                               f'took {end - start}, '
                               f'timeout: {self._election_duration}, '
@@ -425,54 +433,34 @@ class Node:
                          to: NodeId,
                          path: Path,
                          call: Call) -> Dict[str, Any]:
-        self._calls[to].put_nowait((path, call))
-        reply = await self._replies[to][path].get()
+        connection: ClientWebSocketResponse = await self._connect_with(
+                to,
+                method=hdrs.METH_POST,
+                timeout=self.heartbeat,
+                headers={'NodeId': self.id})
+        call_start = self._to_time()
+        await connection.send_json({'path': path,
+                                    'data': call.as_json()})
+        reply = await connection.receive_json()
+        reply_end = self._to_time()
+        self._latencies[to].append(reply_end - call_start)
         return reply
 
-    async def _sender(self,
-                      to: NodeId,
-                      timeout: int = 1,
-                      factor: int = 2,
-                      max_timeout: int = 60) -> None:
-        url = self.urls[to]
-        calls, replies, latencies = (self._calls[to], self._replies[to],
-                                     self._latencies[to])
-        while True:
-            try:
-                async with self._session.ws_connect(
-                        url,
-                        method=hdrs.METH_POST,
-                        timeout=self.heartbeat,
-                        headers={'NodeId': self.id},
-                        heartbeat=self.heartbeat) as connection:
-                    while True:
-                        path, call = await calls.get()
-                        call_start = self._loop.time()
-                        await connection.send_json({'path': path,
-                                                    'data': call.as_json()})
-                        reply = await connection.receive_json()
-                        reply_end = self._loop.time()
-                        latency = reply_end - call_start
-                        latencies.append(latency)
-                        replies[path].put_nowait(reply)
-            except ClientConnectionError:
-                self.logger.warning(f'{self.id} failed '
-                                    f'to establish connection with {to}')
-                timeout = min(max_timeout, timeout * factor)
-                await asyncio.sleep(timeout)
-                continue
+    async def _connect_with(self,
+                            node_id: NodeId,
+                            **kwargs: Any) -> ClientWebSocketResponse:
+        return await self._session.ws_connect(self.urls[node_id], **kwargs)
 
     async def _sync_follower(self, node_id: NodeId) -> None:
         reply = await self._call_sync(node_id)
         await self._process_sync_reply(reply)
 
     async def _sync_followers(self) -> None:
+        self.logger.info(f'{self.id} syncs followers')
         while self._role is Role.LEADER:
             await self._sync_followers_once()
-            await asyncio.sleep(self.heartbeat - self._to_max_latency())
-
-    def _to_max_latency(self) -> float:
-        return sum(max(latencies) for latencies in self._latencies.values())
+            await asyncio.sleep(self.heartbeat
+                                - self._to_expected_accumulated_latency())
 
     async def _sync_followers_once(self) -> None:
         await asyncio.gather(*[self._sync_follower(node_id)
@@ -560,12 +548,23 @@ class Node:
     def _start_sync_timer(self) -> None:
         self._sync_task = self._loop.create_task(self._sync_followers())
 
+    def _to_expected_accumulated_latency(self) -> float:
+        return sum(max(latencies) for latencies in self._latencies.values())
+
+    def _to_expected_latency(self, node_id: NodeId) -> float:
+        return max(self._latencies[node_id])
+
     def _to_new_duration(self) -> float:
+        min_timeout = (self._to_expected_accumulated_latency()
+                       if self._role is Role.LEADER
+                       else (self._leader is not None
+                             and self._to_expected_latency(self._leader)))
         return (self.heartbeat
-                + 10 * (self._to_max_latency()
-                        if self._role is Role.LEADER
-                        else (self._leader is not None
-                              and max(self._latencies[self._leader]))))
+                + random.uniform(min_timeout,
+                                 max(self.heartbeat, min_timeout)))
+
+    def _to_time(self) -> float:
+        return self._loop.time()
 
     def _update_commit_length(self, commit_length: int) -> None:
         if commit_length > self._commit_length:
