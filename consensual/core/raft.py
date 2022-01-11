@@ -198,7 +198,7 @@ class Node:
         self._reelection_task = self._loop.create_future()
         self._results = {node_id: {path: asyncio.Queue() for path in Path}
                          for node_id in self.nodes_ids}
-        self._senders = {node_id: self._sender(node_id)
+        self._senders = {node_id: self._loop.create_task(self._sender(node_id))
                          for node_id in self.nodes_ids}
         self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._session = ClientSession(loop=self._loop)
@@ -260,7 +260,6 @@ class Node:
         return self._voted_for
 
     def run(self) -> None:
-        self._loop.create_task(self._connect())
         self._start_reelection_timer()
         url = self.urls[self.id]
         web.run_app(self._app,
@@ -271,9 +270,6 @@ class Node:
     async def _agitate_voter(self, node_id: NodeId) -> None:
         reply = await self._call_vote(node_id)
         await self._process_vote_reply(reply)
-
-    async def _connect(self) -> None:
-        await asyncio.gather(*self._senders.values())
 
     async def _handle(self, request: web.Request) -> web_ws.WebSocketResponse:
         websocket = web_ws.WebSocketResponse()
