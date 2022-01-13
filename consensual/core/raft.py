@@ -158,7 +158,7 @@ class _Error:
 class Node:
     __slots__ = ('_acknowledged_lengths', '_app', '_calls', '_commit_length',
                  '_election_duration', '_election_task', '_heartbeat', '_id',
-                 '_latencies', '_leader', '_log', '_log_tasks', '_logger',
+                 '_latencies', '_leader', '_log', '_log_task', '_logger',
                  '_loop', '_reelection_lag', '_reelection_task', '_results',
                  '_role', '_routes', '_senders', '_sent_lengths', '_session',
                  '_sync_task', '_term', '_urls', '_voted_for', '_votes')
@@ -192,7 +192,8 @@ class Node:
                                                                maxlen=10)
                                                 for node_id in self.nodes_ids}
         self._leader, self._role = None, Role.FOLLOWER
-        self._log_tasks = []
+        self._log_task = self._loop.create_future()
+        self._log_task.set_result(None)
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._results = {node_id: {path: asyncio.Queue() for path in Path}
@@ -341,11 +342,19 @@ class Node:
             else:
                 return LogReply(**raw_reply)
 
-    async def _process_record(self, record: Record) -> None:
-        self.logger.debug(f'{self.id} processes {record} '
-                          f'with log {self.log}')
-        await self.routes[record.data['path']](self, record.data['data'])
-        self.logger.debug(f'{self.id} finished processing {record} '
+    def _process_records(self, records: List[Record]) -> None:
+        def process(_: asyncio.Future) -> None:
+            self.logger.debug(f'{self.id} processes {records} '
+                              f'with log {self.log}')
+            self._log_task = self._loop.create_task(
+                    self._process_sequentially(records))
+
+        self._log_task.add_done_callback(process)
+
+    async def _process_sequentially(self, records: List[Record]) -> None:
+        for record in records:
+            await self.routes[record.data['path']](self, record.data['data'])
+        self.logger.debug(f'{self.id} finished processing {records} '
                           f'with log {self.log}')
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
@@ -525,11 +534,8 @@ class Node:
                     length > self._commit_length
                     for length in self._acknowledged_lengths.values())
             if acknowledgements >= self.majority_count:
-                self._log_tasks.append(self._loop.create_task(
-                        self._process_record(self.log[self._commit_length])))
+                self._process_records([self.log[self._commit_length]])
                 self._commit_length += 1
-                assert len(self._log_tasks) == self._commit_length, (
-                    len(self._log_tasks), self._commit_length)
             else:
                 break
 
@@ -604,13 +610,8 @@ class Node:
 
     def _update_commit_length(self, commit_length: int) -> None:
         if commit_length > self._commit_length:
-            self._log_tasks += [
-                self._loop.create_task(self._process_record(record))
-                for record in self.log[self._commit_length:commit_length]]
+            self._process_records(self.log[self._commit_length:commit_length])
             self._commit_length = commit_length
-            assert len(self._log_tasks) == self._commit_length, (
-                len(self._log_tasks),
-                self._commit_length)
 
 
 def ceil_division(dividend: int, divisor: int) -> int:
