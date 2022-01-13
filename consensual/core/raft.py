@@ -439,9 +439,10 @@ class Node:
         self.logger.debug(f'{self.id} runs election for term {self.term}')
         start = self._to_time()
         try:
-            async with async_timeout.timeout(self._election_duration):
-                await asyncio.gather(*[self._agitate_voter(node_id)
-                                       for node_id in self.nodes_ids])
+            await asyncio.wait_for(
+                    asyncio.gather(*[self._agitate_voter(node_id)
+                                     for node_id in self.nodes_ids]),
+                    self._election_duration)
         finally:
             end = self._to_time()
             self.logger.debug(f'{self.id} election for term {self.term} '
