@@ -8,7 +8,6 @@ from asyncio import get_event_loop
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import (Any,
-                    Awaitable,
                     Callable,
                     Collection,
                     Dict,
