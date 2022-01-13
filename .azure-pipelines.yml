@@ -22,7 +22,7 @@ strategy:
       python.architecture: 'x64'
     MacOs CPython3.10:
       image: 'macos-latest'
-      python.version: '3.9'
+      python.version: '3.10'
       python.architecture: 'x64'
     Ubuntu CPython3.7:
       image: 'ubuntu-latest'
