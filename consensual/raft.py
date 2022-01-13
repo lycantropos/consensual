@@ -1,9 +1,11 @@
-from .core.raft import (Node,
+from .core.raft import (Command,
+                        Node,
                         NodeId,
                         Record,
                         Route,
                         Term)
 
+Command = Command
 Node = Node
 NodeId = NodeId
 Record = Record

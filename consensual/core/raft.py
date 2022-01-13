@@ -11,6 +11,7 @@ from typing import (Any,
                     Callable,
                     Collection,
                     Dict,
+                    Generic,
                     List,
                     Mapping,
                     NoReturn,
@@ -34,17 +35,35 @@ from yarl import URL
 MIN_DURATION = 5
 
 NodeId = str
-Route = Callable[['Node', Any], Awaitable[Any]]
+_T1 = TypeVar('_T1')
+_T2 = TypeVar('_T2')
+Route = Callable[['Node', _T1], Awaitable[_T2]]
 Term = int
+
+_T = TypeVar('_T')
+
+
+@dataclasses.dataclass
+class Command(Generic[_T]):
+    path: str
+    parameters: Any
 
 
 @dataclasses.dataclass
 class Record:
-    data: Any
+    command: Command
     term: Term
 
+    @classmethod
+    def from_json(cls,
+                  *,
+                  command: Dict[str, Any],
+                  term: Term) -> 'Record':
+        return cls(command=Command(**command),
+                   term=term)
 
-class Path(enum.IntEnum):
+
+class CallPath(enum.IntEnum):
     LOG = 0
     SYNC = 1
     VOTE = 2
@@ -63,10 +82,14 @@ class Call(Protocol):
 
 @dataclasses.dataclass
 class LogCall:
-    data: Any
+    command: Command
 
     def as_json(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
+
+    @classmethod
+    def from_json(cls, command: Dict[str, Any]) -> 'LogCall':
+        return cls(Command(**command))
 
 
 @dataclasses.dataclass
@@ -94,7 +117,8 @@ class SyncCall:
                   *,
                   suffix: List[Dict[str, Any]],
                   **kwargs: Any) -> 'SyncCall':
-        return cls(suffix=[Record(**raw_record) for raw_record in suffix],
+        return cls(suffix=[Record.from_json(**raw_record)
+                           for raw_record in suffix],
                    **kwargs)
 
 
@@ -128,9 +152,6 @@ class VoteReply:
 
     def as_json(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
-
-
-_T = TypeVar('_T')
 
 
 class _Result(Protocol[_T]):
@@ -196,7 +217,7 @@ class Node:
         self._log_task.set_result(None)
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
-        self._results = {node_id: {path: asyncio.Queue() for path in Path}
+        self._results = {node_id: {path: asyncio.Queue() for path in CallPath}
                          for node_id in self.nodes_ids}
         self._senders = {node_id: self._loop.create_task(self._sender(node_id))
                          for node_id in self.nodes_ids}
@@ -274,22 +295,23 @@ class Node:
     async def _handle(self, request: web.Request) -> web_ws.WebSocketResponse:
         websocket = web_ws.WebSocketResponse()
         await websocket.prepare(request)
-        routes = {Path.LOG: (LogCall, self._process_log_call),
-                  Path.SYNC: (SyncCall.from_json, self._process_sync_call),
-                  Path.VOTE: (VoteCall, self._process_vote_call)}
+        routes = {CallPath.LOG: (LogCall.from_json, self._process_log_call),
+                  CallPath.SYNC: (SyncCall.from_json, self._process_sync_call),
+                  CallPath.VOTE: (VoteCall, self._process_vote_call)}
         async for message in websocket:
             message: web_ws.WSMessage
             raw_call = message.json()
-            call_cls, processor = routes[Path(raw_call['path'])]
+            call_cls, processor = routes[CallPath(raw_call['path'])]
             call = call_cls(**raw_call['data'])
             reply = await processor(call)
             await websocket.send_json(reply.as_json())
         return websocket
 
     async def _handle_route(self, request: web.Request) -> web.Response:
-        raw_call = await request.json()
-        reply = await self._process_log_call(LogCall({'data': raw_call,
-                                                      'path': request.path}))
+        parameters = await request.json()
+        reply = await self._process_log_call(
+                LogCall(Command(path=request.path,
+                                parameters=parameters)))
         return web.json_response(reply.as_json())
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
@@ -303,7 +325,7 @@ class Node:
                         commit_length=self._commit_length,
                         suffix=self.log[prefix_length:])
         try:
-            raw_reply = await self._send_call(node_id, Path.SYNC, call)
+            raw_reply = await self._send_call(node_id, CallPath.SYNC, call)
         except (ClientError, OSError):
             return SyncReply(node_id=node_id,
                              term=self.term,
@@ -318,7 +340,7 @@ class Node:
                         log_length=len(self.log),
                         log_term=self.log_term)
         try:
-            raw_reply = await self._send_call(node_id, Path.VOTE, call)
+            raw_reply = await self._send_call(node_id, CallPath.VOTE, call)
         except (ClientError, OSError):
             return VoteReply(node_id=node_id,
                              term=self.term,
@@ -329,14 +351,15 @@ class Node:
     async def _process_log_call(self, call: LogCall) -> LogReply:
         assert self._leader is not None
         if self._role is Role.LEADER:
-            self.log.append(Record(call.data, self.term))
+            self.log.append(Record(call.command, self.term))
             await self._sync_followers_once()
             assert self._acknowledged_lengths[self.id] == len(self.log)
             return LogReply(error=None)
         else:
             assert self._role is Role.FOLLOWER
             try:
-                raw_reply = await self._send_call(self._leader, Path.LOG, call)
+                raw_reply = await self._send_call(self._leader, CallPath.LOG,
+                                                  call)
             except (ClientError, OSError) as exception:
                 return LogReply(error=format_exception(exception))
             else:
@@ -353,7 +376,8 @@ class Node:
 
     async def _process_sequentially(self, records: List[Record]) -> None:
         for record in records:
-            await self.routes[record.data['path']](self, record.data['data'])
+            await self.routes[record.command.path](self,
+                                                   record.command.parameters)
         self.logger.debug(f'{self.id} finished processing {records} '
                           f'with log {self.log}')
 
@@ -460,7 +484,7 @@ class Node:
 
     async def _send_call(self,
                          to: NodeId,
-                         path: Path,
+                         path: CallPath,
                          call: Call) -> Dict[str, Any]:
         self._calls[to].put_nowait((path, call))
         result = await self._results[to][path].get()
