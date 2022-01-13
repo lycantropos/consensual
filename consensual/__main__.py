@@ -54,7 +54,7 @@ def main(index: int, urls: List[URL]) -> None:
     nodes_urls = dict(zip(map(url_to_node_id, urls), urls))
     Node(node_id, nodes_urls,
          logger=to_logger(str(node_id)),
-         routes={'/log': process_log}).run()
+         processors={'/log': process_log}).run()
 
 
 def process_log(node: Node, parameters: Any) -> None:

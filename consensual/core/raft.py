@@ -7,6 +7,7 @@ import traceback
 from asyncio import get_event_loop
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from types import MappingProxyType
 from typing import (Any,
                     Callable,
                     Collection,
@@ -37,7 +38,7 @@ MIN_DURATION = 5
 NodeId = str
 _T1 = TypeVar('_T1')
 _T2 = TypeVar('_T2')
-Route = Callable[['Node', _T1], _T2]
+Processor = Callable[['Node', _T1], _T2]
 Term = int
 
 _T = TypeVar('_T')
@@ -181,7 +182,7 @@ class Node:
                  '_commands_executor', '_commit_length', '_election_duration',
                  '_election_task', '_heartbeat', '_id', '_latencies',
                  '_leader', '_log', '_logger', '_loop', '_reelection_lag',
-                 '_reelection_task', '_results', '_role', '_routes',
+                 '_reelection_task', '_results', '_role', '_processors',
                  '_senders', '_sent_lengths', '_session', '_sync_task',
                  '_term', '_urls', '_voted_for', '_votes')
 
@@ -192,7 +193,7 @@ class Node:
                  heartbeat: int = MIN_DURATION,
                  log: Optional[List[Record]] = None,
                  logger: Optional[logging.Logger] = None,
-                 routes: Dict[str, Route],
+                 processors: Dict[str, Processor],
                  term: Term = 0,
                  voted_for: Optional[NodeId] = None) -> None:
         self._heartbeat = heartbeat
@@ -200,7 +201,7 @@ class Node:
         self._log = [] if log is None else log
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
-        self._routes = routes
+        self._processors = processors
         self._term = term
         self._urls = urls
         self._voted_for = voted_for
@@ -226,7 +227,7 @@ class Node:
         self._sync_task = self._loop.create_future()
         self._votes = set()
         self._app.router.add_post('/', self._handle)
-        for path in self.routes.keys():
+        for path in self.processors.keys():
             self._app.router.add_post(path, self._handle_route)
 
     __repr__ = generate_repr(__init__,
@@ -265,8 +266,8 @@ class Node:
         return self.urls.keys()
 
     @property
-    def routes(self) -> Dict[str, Route]:
-        return self._routes
+    def processors(self) -> Mapping[str, Processor]:
+        return MappingProxyType(self._processors)
 
     @property
     def term(self) -> Term:
@@ -373,7 +374,7 @@ class Node:
     def _process_commands(self, commands: List[Command]) -> None:
         self.logger.debug(f'{self.id} processes {commands}')
         for command in commands:
-            self.routes[command.path](self, command.parameters)
+            self.processors[command.path](self, command.parameters)
         self.logger.debug(f'{self.id} finished processing {commands}')
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
