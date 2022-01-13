@@ -6,6 +6,7 @@ import random
 import traceback
 from asyncio import get_event_loop
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from typing import (Any,
                     Awaitable,
                     Callable,
@@ -37,7 +38,7 @@ MIN_DURATION = 5
 NodeId = str
 _T1 = TypeVar('_T1')
 _T2 = TypeVar('_T2')
-Route = Callable[['Node', _T1], Awaitable[_T2]]
+Route = Callable[['Node', _T1], _T2]
 Term = int
 
 _T = TypeVar('_T')
@@ -177,12 +178,13 @@ class _Error:
 
 
 class Node:
-    __slots__ = ('_acknowledged_lengths', '_app', '_calls', '_commit_length',
-                 '_election_duration', '_election_task', '_heartbeat', '_id',
-                 '_latencies', '_leader', '_log', '_log_task', '_logger',
-                 '_loop', '_reelection_lag', '_reelection_task', '_results',
-                 '_role', '_routes', '_senders', '_sent_lengths', '_session',
-                 '_sync_task', '_term', '_urls', '_voted_for', '_votes')
+    __slots__ = ('_acknowledged_lengths', '_app', '_calls',
+                 '_commands_executor', '_commit_length', '_election_duration',
+                 '_election_task', '_heartbeat', '_id', '_latencies',
+                 '_leader', '_log', '_logger', '_loop', '_reelection_lag',
+                 '_reelection_task', '_results', '_role', '_routes',
+                 '_senders', '_sent_lengths', '_session', '_sync_task',
+                 '_term', '_urls', '_voted_for', '_votes')
 
     def __init__(self,
                  id_: NodeId,
@@ -206,6 +208,7 @@ class Node:
         self._acknowledged_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._app = web.Application()
         self._calls = {node_id: asyncio.Queue() for node_id in self.nodes_ids}
+        self._commands_executor = ThreadPoolExecutor(max_workers=1)
         self._commit_length = 0
         self._election_duration = 0
         self._election_task = self._loop.create_future()
@@ -213,8 +216,6 @@ class Node:
                                                                maxlen=10)
                                                 for node_id in self.nodes_ids}
         self._leader, self._role = None, Role.FOLLOWER
-        self._log_task = self._loop.create_future()
-        self._log_task.set_result(None)
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._results = {node_id: {path: asyncio.Queue() for path in CallPath}
@@ -366,18 +367,15 @@ class Node:
                 return LogReply(**raw_reply)
 
     def _process_records(self, records: List[Record]) -> None:
-        def process(_: asyncio.Future) -> None:
-            self.logger.debug(f'{self.id} processes {records}')
-            self._log_task = self._loop.create_task(
-                    self._process_sequentially(records))
+        self._loop.run_in_executor(self._commands_executor,
+                                   self._process_commands,
+                                   [record.command for record in records])
 
-        self._log_task.add_done_callback(process)
-
-    async def _process_sequentially(self, records: List[Record]) -> None:
-        for record in records:
-            await self.routes[record.command.path](self,
-                                                   record.command.parameters)
-        self.logger.debug(f'{self.id} finished processing {records}')
+    def _process_commands(self, commands: List[Command]) -> None:
+        self.logger.debug(f'{self.id} processes {commands}')
+        for command in commands:
+            self.routes[command.path](self, command.parameters)
+        self.logger.debug(f'{self.id} finished processing {commands}')
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self.id} processes {call}')

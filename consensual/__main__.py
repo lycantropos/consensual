@@ -1,6 +1,8 @@
 import asyncio
 import logging.config
+import random
 import sys
+import time
 from typing import (Any,
                     List)
 
@@ -56,9 +58,12 @@ def main(index: int, urls: List[URL]) -> None:
          routes={'/log': process_log}).run()
 
 
-async def process_log(node: Node, data: Any) -> None:
-    node.logger.debug(f'{node.id} processes {data}')
-    await asyncio.sleep(10)
+def process_log(node: Node, parameters: Any) -> None:
+    node.logger.debug(f'{node.id} processes {parameters}')
+    delay = random.uniform(0, 10)
+    time.sleep(delay)
+    node.logger.debug(f'{node.id} finished processing {parameters} '
+                      f'after {delay}s')
 
 
 def url_to_node_id(url: URL) -> NodeId:
