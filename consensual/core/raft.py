@@ -367,8 +367,7 @@ class Node:
 
     def _process_records(self, records: List[Record]) -> None:
         def process(_: asyncio.Future) -> None:
-            self.logger.debug(f'{self.id} processes {records} '
-                              f'with log {self.log}')
+            self.logger.debug(f'{self.id} processes {records}')
             self._log_task = self._loop.create_task(
                     self._process_sequentially(records))
 
@@ -378,8 +377,7 @@ class Node:
         for record in records:
             await self.routes[record.command.path](self,
                                                    record.command.parameters)
-        self.logger.debug(f'{self.id} finished processing {records} '
-                          f'with log {self.log}')
+        self.logger.debug(f'{self.id} finished processing {records}')
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self.id} processes {call}')
