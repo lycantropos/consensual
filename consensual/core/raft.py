@@ -22,7 +22,6 @@ try:
 except ImportError:
     from typing_extensions import Protocol
 
-import async_timeout
 from aiohttp import (ClientError,
                      ClientSession,
                      hdrs,
