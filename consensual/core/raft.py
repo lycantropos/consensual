@@ -477,6 +477,7 @@ class Node:
                               f'took {end - start}, '
                               f'timeout: {self._election_duration}, '
                               f'role: {self._role.name}')
+            await asyncio.sleep(self._election_duration - (end - start))
 
     async def _send_call(self,
                          to: NodeId,
