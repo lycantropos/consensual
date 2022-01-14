@@ -181,10 +181,10 @@ class Node:
     __slots__ = ('_acknowledged_lengths', '_app', '_calls',
                  '_commands_executor', '_commit_length', '_election_duration',
                  '_election_task', '_heartbeat', '_id', '_latencies',
-                 '_leader', '_log', '_logger', '_loop', '_reelection_lag',
-                 '_reelection_task', '_results', '_role', '_processors',
-                 '_senders', '_sent_lengths', '_session', '_sync_task',
-                 '_term', '_urls', '_voted_for', '_votes')
+                 '_leader', '_log', '_logger', '_loop', '_patch_routes',
+                 '_processors', '_reelection_lag', '_reelection_task',
+                 '_results', '_role', '_senders', '_sent_lengths', '_session',
+                 '_sync_task', '_term', '_urls', '_voted_for', '_votes')
 
     def __init__(self,
                  id_: NodeId,
@@ -201,7 +201,6 @@ class Node:
         self._log = [] if log is None else log
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
-        self._processors = processors
         self._term = term
         self._urls = urls
         self._voted_for = voted_for
@@ -216,6 +215,12 @@ class Node:
                                                                maxlen=10)
                                                 for node_id in self.nodes_ids}
         self._leader, self._role = None, Role.FOLLOWER
+        self._patch_routes = {
+            CallPath.LOG: (LogCall.from_json, self._process_log_call),
+            CallPath.SYNC: (SyncCall.from_json, self._process_sync_call),
+            CallPath.VOTE: (VoteCall, self._process_vote_call),
+        }
+        self._processors = processors
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._results = {node_id: {path: asyncio.Queue() for path in CallPath}
@@ -226,9 +231,9 @@ class Node:
         self._session = ClientSession(loop=self._loop)
         self._sync_task = self._loop.create_future()
         self._votes = set()
-        self._app.router.add_post('/', self._handle)
+        self._app.router.add_patch('/', self._handle_patch)
         for path in self.processors.keys():
-            self._app.router.add_post(path, self._handle_route)
+            self._app.router.add_post(path, self._handle_post)
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
@@ -293,12 +298,11 @@ class Node:
         reply = await self._call_vote(node_id)
         await self._process_vote_reply(reply)
 
-    async def _handle(self, request: web.Request) -> web_ws.WebSocketResponse:
+    async def _handle_patch(self,
+                            request: web.Request) -> web_ws.WebSocketResponse:
         websocket = web_ws.WebSocketResponse()
         await websocket.prepare(request)
-        routes = {CallPath.LOG: (LogCall.from_json, self._process_log_call),
-                  CallPath.SYNC: (SyncCall.from_json, self._process_sync_call),
-                  CallPath.VOTE: (VoteCall, self._process_vote_call)}
+        routes = self._patch_routes
         async for message in websocket:
             message: web_ws.WSMessage
             raw_call = message.json()
@@ -308,7 +312,7 @@ class Node:
             await websocket.send_json(reply.as_json())
         return websocket
 
-    async def _handle_route(self, request: web.Request) -> web.Response:
+    async def _handle_post(self, request: web.Request) -> web.Response:
         parameters = await request.json()
         reply = await self._process_log_call(
                 LogCall(Command(path=request.path,
@@ -496,9 +500,8 @@ class Node:
             try:
                 async with self._session.ws_connect(
                         url,
-                        method=hdrs.METH_POST,
+                        method=hdrs.METH_PATCH,
                         timeout=self.heartbeat,
-                        headers={'NodeId': self.id},
                         heartbeat=self.heartbeat) as connection:
                     call_start = self._loop.time()
                     await connection.send_json({'path': path,
