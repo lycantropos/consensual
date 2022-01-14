@@ -476,12 +476,12 @@ class Node:
                                      for node_id in self.nodes_ids]),
                     self._election_duration)
         finally:
-            end = self._to_time()
+            duration = self._to_time() - start
             self.logger.debug(f'{self.id} election for term {self.term} '
-                              f'took {end - start}, '
+                              f'took {duration}s, '
                               f'timeout: {self._election_duration}, '
                               f'role: {self._role.name}')
-            await asyncio.sleep(self._election_duration - (end - start))
+            await asyncio.sleep(self._election_duration - duration)
 
     async def _send_call(self,
                          to: NodeId,
@@ -527,8 +527,11 @@ class Node:
     async def _sync_followers(self) -> None:
         self.logger.info(f'{self.id} syncs followers')
         while self._role is Role.LEADER:
+            start = self._to_time()
             await self._sync_followers_once()
-            await asyncio.sleep(self.heartbeat
+            duration = self._to_time() - start
+            self.logger.debug(f'{self.id} followers\' sync took {duration}s')
+            await asyncio.sleep(self.heartbeat - duration
                                 - self._to_expected_accumulated_latency())
 
     async def _sync_followers_once(self) -> None:
