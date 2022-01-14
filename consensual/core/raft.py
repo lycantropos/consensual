@@ -370,17 +370,6 @@ class Node:
             else:
                 return LogReply(**raw_reply)
 
-    def _process_records(self, records: List[Record]) -> None:
-        self._loop.run_in_executor(self._commands_executor,
-                                   self._process_commands,
-                                   [record.command for record in records])
-
-    def _process_commands(self, commands: List[Command]) -> None:
-        self.logger.debug(f'{self.id} processes {commands}')
-        for command in commands:
-            self.processors[command.path](self, command.parameters)
-        self.logger.debug(f'{self.id} finished processing {commands}')
-
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self.id} processes {call}')
         self._restart_reelection_timer()
@@ -589,6 +578,17 @@ class Node:
             self._sent_lengths[node_id] = len(self.log)
             self._acknowledged_lengths[node_id] = 0
         self._start_sync_timer()
+
+    def _process_records(self, records: List[Record]) -> None:
+        self._loop.run_in_executor(self._commands_executor,
+                                   self._process_commands,
+                                   [record.command for record in records])
+
+    def _process_commands(self, commands: List[Command]) -> None:
+        self.logger.debug(f'{self.id} processes {commands}')
+        for command in commands:
+            self.processors[command.path](self, command.parameters)
+        self.logger.debug(f'{self.id} finished processing {commands}')
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self.id} restarts election timer '
