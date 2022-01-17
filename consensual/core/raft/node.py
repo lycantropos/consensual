@@ -420,18 +420,15 @@ class Node:
                 return UpdateReply(error=format_exception(exception))
             else:
                 return UpdateReply(**raw_reply)
-        if self.configuration == call.configuration:
-            return UpdateReply(error=f'{self.id} got the same configuration')
-        else:
-            transitional_configuration = TransitionalClusterConfiguration(
-                    self.configuration, call.configuration)
-            self.state.log.append(Record(
-                    Command(path=START_CONFIGURATION_UPDATE_COMMAND_PATH,
-                            parameters=transitional_configuration.as_json()),
-                    self.state.term))
-            self._update_configuration(transitional_configuration)
-            await self._sync_followers_once()
-            return UpdateReply(error=None)
+        transitional_configuration = TransitionalClusterConfiguration(
+                self.configuration, call.configuration)
+        self.state.log.append(Record(
+                Command(path=START_CONFIGURATION_UPDATE_COMMAND_PATH,
+                        parameters=transitional_configuration.as_json()),
+                self.state.term))
+        self._update_configuration(transitional_configuration)
+        await self._sync_followers_once()
+        return UpdateReply(error=None)
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self.id} processes {call}')
