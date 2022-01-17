@@ -232,7 +232,8 @@ class Node:
 
     @property
     def _passive(self) -> bool:
-        return self.id not in self.configuration.active_nodes_ids
+        return (self.id in self.configuration.nodes_ids
+                and self.id not in self.configuration.active_nodes_ids)
 
     async def _agitate_voter(self, node_id: NodeId) -> None:
         reply = await self._call_vote(node_id)
