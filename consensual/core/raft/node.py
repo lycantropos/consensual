@@ -391,7 +391,9 @@ class Node:
             if (reply.successful
                     and (reply.accepted_length
                          >= self.state.accepted_lengths[reply.node_id])):
-                if reply.node_id not in self.configuration.active_nodes_ids:
+                if (reply.node_id not in self.configuration.nodes_ids
+                        and (reply.node_id
+                             not in self.configuration.active_nodes_ids)):
                     self.configuration.activate(reply.node_id)
                 self.state.accepted_lengths[reply.node_id] = (
                     reply.accepted_length)
