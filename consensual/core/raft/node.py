@@ -38,6 +38,7 @@ from .node_state import (NodeState,
 from .record import Record
 from .utils import format_exception
 
+NODE_IS_PASSIVE_ERROR = web.HTTPBadRequest(reason='node is passive')
 START_CONFIGURATION_UPDATE_COMMAND_PATH = '0'
 END_CONFIGURATION_UPDATE_COMMAND_PATH = '1'
 assert (START_CONFIGURATION_UPDATE_COMMAND_PATH
@@ -247,7 +248,7 @@ class Node:
             raw_call = message.json()
             call_path = CallPath(raw_call['path'])
             if self._passive and call_path is not CallPath.SYNC:
-                raise web.HTTPBadRequest()
+                raise NODE_IS_PASSIVE_ERROR
             call_cls, processor = routes[call_path]
             call = call_cls(**raw_call['message'])
             reply = await processor(call)
@@ -256,7 +257,7 @@ class Node:
 
     async def _handle_delete(self, request: web.Request) -> web.Response:
         if self._passive:
-            raise web.HTTPBadRequest()
+            raise NODE_IS_PASSIVE_ERROR
         self.logger.debug(f'{self.id} gets removed')
         rest_nodes_urls = dict(self.configuration.nodes_urls)
         del rest_nodes_urls[self.id]
@@ -268,7 +269,7 @@ class Node:
 
     async def _handle_post(self, request: web.Request) -> web.Response:
         if self._passive:
-            raise web.HTTPBadRequest()
+            raise NODE_IS_PASSIVE_ERROR
         raw_nodes_urls_to_add = await request.json()
         nodes_urls_to_add = {
             node_id: URL(raw_node_url)
@@ -285,7 +286,7 @@ class Node:
 
     async def _handle_record(self, request: web.Request) -> web.Response:
         if self._passive:
-            raise web.HTTPBadRequest()
+            raise NODE_IS_PASSIVE_ERROR
         parameters = await request.json()
         reply = await self._process_log_call(
                 LogCall(Command(path=request.path,
