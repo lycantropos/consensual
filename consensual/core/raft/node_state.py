@@ -58,7 +58,6 @@ class NodeState:
 
     @leader_node_id.setter
     def leader_node_id(self, value: Optional[NodeId]) -> None:
-        assert value is None or value in self.nodes_ids
         self._leader_node_id = value
 
     @property
