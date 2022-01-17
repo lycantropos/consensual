@@ -77,8 +77,10 @@ class ClusterConfiguration:
 
 
 class TransitionalClusterConfiguration:
-    def __init__(self, old: ClusterConfiguration, new: ClusterConfiguration):
-        self.new, self.old = new, old
+    def __init__(self,
+                 old: ClusterConfiguration,
+                 new: ClusterConfiguration) -> None:
+        self._new, self._old = new, old
 
     __repr__ = generate_repr(__init__)
 
@@ -88,20 +90,28 @@ class TransitionalClusterConfiguration:
                 else NotImplemented)
 
     @property
-    def nodes_urls(self) -> Mapping[NodeId, URL]:
-        return {**self.old.nodes_urls, **self.new.nodes_urls}
+    def active_nodes_ids(self) -> Collection[NodeId]:
+        return set(self.old.active_nodes_ids) | set(self.new.active_nodes_ids)
 
     @property
     def heartbeat(self) -> Time:
         return self.new.heartbeat
 
     @property
+    def new(self) -> ClusterConfiguration:
+        return self._new
+
+    @property
     def nodes_ids(self) -> Collection[NodeId]:
         return self.old.nodes_urls.keys() | self.new.nodes_urls.keys()
 
     @property
-    def active_nodes_ids(self) -> Collection[NodeId]:
-        return set(self.old.active_nodes_ids) | set(self.new.active_nodes_ids)
+    def nodes_urls(self) -> Mapping[NodeId, URL]:
+        return {**self.old.nodes_urls, **self.new.nodes_urls}
+
+    @property
+    def old(self) -> ClusterConfiguration:
+        return self._old
 
     @classmethod
     def from_json(cls,
@@ -111,11 +121,11 @@ class TransitionalClusterConfiguration:
         return cls(old=ClusterConfiguration.from_json(**old),
                    new=ClusterConfiguration.from_json(**new))
 
-    def as_json(self) -> Dict[str, Any]:
-        return {'old': self.old.as_json(), 'new': self.new.as_json()}
-
     def activate(self, node_id: NodeId) -> None:
         self.new.activate(node_id)
+
+    def as_json(self) -> Dict[str, Any]:
+        return {'old': self.old.as_json(), 'new': self.new.as_json()}
 
     def has_majority(self, nodes_ids: Collection[NodeId]) -> bool:
         return (self.old.has_majority(nodes_ids)
