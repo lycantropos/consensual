@@ -333,8 +333,10 @@ class Node:
             return VoteReply(**raw_reply)
 
     async def _process_log_call(self, call: LogCall) -> LogReply:
-        assert self.state.leader_node_id is not None
-        if self.state.role is Role.LEADER:
+        self.logger.debug(f'{self.id} processes {call}')
+        if self.state.leader_node_id is None:
+            return LogReply(error=f'{self.id} has no leader')
+        elif self.state.role is Role.LEADER:
             self.state.log.append(Record(call.command, self.state.term))
             await self._sync_followers_once()
             assert self.state.accepted_lengths[self.id] == len(self.state.log)
@@ -403,14 +405,19 @@ class Node:
             self._cancel_election_timer()
 
     async def _process_update_call(self, call: UpdateCall) -> UpdateReply:
-        assert self.state.leader_node_id is not None
         self.logger.debug(f'{self.id} processes {call}')
-        if self.state.role is not Role.LEADER:
-            raw_reply = await self._send_call(self.state.leader_node_id,
-                                              CallPath.UPDATE, call)
-            return UpdateReply(**raw_reply)
+        if self.state.leader_node_id is None:
+            return UpdateReply(error=f'{self.id} has no leader')
+        elif self.state.role is not Role.LEADER:
+            try:
+                raw_reply = await self._send_call(self.state.leader_node_id,
+                                                  CallPath.UPDATE, call)
+            except (ClientError, OSError) as exception:
+                return UpdateReply(error=format_exception(exception))
+            else:
+                return UpdateReply(**raw_reply)
         if self.configuration == call.configuration:
-            reply = UpdateReply(error='got the same configuration')
+            return UpdateReply(error=f'{self.id} got the same configuration')
         else:
             transitional_configuration = TransitionalClusterConfiguration(
                     self.configuration, call.configuration)
@@ -420,8 +427,7 @@ class Node:
                     self.state.term))
             self._update_configuration(transitional_configuration)
             await self._sync_followers_once()
-            reply = UpdateReply(error=None)
-        return reply
+            return UpdateReply(error=None)
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self.id} processes {call}')
