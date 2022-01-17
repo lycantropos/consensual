@@ -275,7 +275,12 @@ class Node:
             node_id: URL(raw_node_url)
             for node_id, raw_node_url in raw_nodes_urls_to_add.items()}
         nodes_ids_to_add = nodes_urls_to_add.keys()
-        assert not nodes_ids_to_add & set(self.configuration.nodes_ids)
+        existing_nodes_ids = (nodes_ids_to_add
+                              & set(self.configuration.nodes_ids))
+        if existing_nodes_ids:
+            raise web.HTTPBadRequest(
+                    reason=('nodes {nodes_ids} already exist'
+                            .format(nodes_ids=', '.join(existing_nodes_ids))))
         self.logger.debug(f'{self.id} adds {nodes_urls_to_add} '
                           f'to {self.configuration.nodes_urls}')
         call = UpdateCall(ClusterConfiguration(
