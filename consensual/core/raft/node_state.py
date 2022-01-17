@@ -118,8 +118,7 @@ def update_state_nodes_ids(state: NodeState,
         del (state.accepted_lengths[removed_node_id],
              state.sent_lengths[removed_node_id])
     added_nodes_ids = new_nodes_ids - old_nodes_ids
-    state.accepted_lengths.update({node_id: 0
-                                   for node_id in added_nodes_ids})
+    state.accepted_lengths.update({node_id: 0 for node_id in added_nodes_ids})
     state.sent_lengths.update({node_id: 0 for node_id in added_nodes_ids})
     state.nodes_ids = nodes_ids
 
