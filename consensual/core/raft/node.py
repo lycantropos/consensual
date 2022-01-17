@@ -281,8 +281,9 @@ class Node:
             raise web.HTTPBadRequest(
                     reason=('nodes {nodes_ids} already exist'
                             .format(nodes_ids=', '.join(existing_nodes_ids))))
-        self.logger.debug(f'{self.id} adds {nodes_urls_to_add} '
-                          f'to {self.configuration.nodes_urls}')
+        self.logger.debug('{id} adds {nodes_ids}'
+                          .format(id=self.id,
+                                  nodes_ids=', '.join(nodes_urls_to_add)))
         call = UpdateCall(ClusterConfiguration(
                 {**self.configuration.nodes_urls, **nodes_urls_to_add},
                 heartbeat=self.configuration.heartbeat))
@@ -661,8 +662,9 @@ class Node:
 
     def _update_configuration(self,
                               configuration: AnyClusterConfiguration) -> None:
-        self.logger.debug(f'{self.id} changes configuration '
-                          f'from {self.configuration} to {configuration}')
+        self.logger.debug(f'{self.id} changes configuration\n'
+                          f'from {sorted(self.configuration.nodes_ids)}\n'
+                          f'to {sorted(configuration.nodes_ids)}')
         self._configuration = configuration
         update_communication_configuration(self._communication, configuration)
         update_state_nodes_ids(self.state, configuration.nodes_ids)
