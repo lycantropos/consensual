@@ -32,4 +32,5 @@ class Error:
 
 
 def format_exception(value: Exception) -> str:
-    return traceback.format_exception(type(value), value, value.__traceback__)
+    return ''.join(traceback.format_exception(type(value), value,
+                                              value.__traceback__))
