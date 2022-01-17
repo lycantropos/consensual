@@ -554,6 +554,9 @@ class Node:
     def _cancel_reelection_timer(self) -> None:
         self._reelection_task.cancel()
 
+    def _cancel_sync_timer(self) -> None:
+        self._sync_task.cancel()
+
     def _commit(self, records: List[Record]) -> None:
         assert records
         self._process_records(records)
@@ -618,6 +621,10 @@ class Node:
         self._cancel_reelection_timer()
         self._start_reelection_timer()
 
+    def _restart_sync_timer(self) -> None:
+        self._cancel_sync_timer()
+        self._start_sync_timer()
+
     def _start_configuration_update(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self.id} starts configuration update')
         assert isinstance(self.configuration, TransitionalClusterConfiguration)
@@ -630,6 +637,7 @@ class Node:
                             parameters=configuration.new.as_json()),
                     self.state.term))
             self._update_configuration(configuration.new)
+            self._restart_sync_timer()
 
     def _start_election_timer(self) -> None:
         self._election_duration = self._to_new_duration()
