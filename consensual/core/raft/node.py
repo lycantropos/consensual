@@ -649,9 +649,13 @@ class Node:
 
     def _to_new_duration(self) -> Time:
         broadcast_time = self._communication.to_expected_broadcast_time()
-        assert 100 * broadcast_time < self.configuration.heartbeat
-        return (self.configuration.heartbeat
-                + random.uniform(broadcast_time, self.configuration.heartbeat))
+        heartbeat = self.configuration.heartbeat
+        assert (
+                broadcast_time < heartbeat
+        ), (
+            f'broadcast time = {broadcast_time} < {heartbeat} = heartbeat'
+        )
+        return heartbeat + random.uniform(broadcast_time, heartbeat)
 
     def _to_time(self) -> Time:
         return self._loop.time()
