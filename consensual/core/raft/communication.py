@@ -41,8 +41,10 @@ class Communication(Generic[_T]):
                                    for path in self.paths}
                          for node_id in self.configuration.nodes_ids}
         self._session = ClientSession(loop=self._loop)
-        self._senders = {node_id: self._loop.create_task(self._sender(node_id))
-                         for node_id in self.configuration.nodes_ids}
+        self._channels = {
+            node_id: self._loop.create_task(self._channel(node_id))
+            for node_id in self.configuration.nodes_ids
+        }
 
     __repr__ = generate_repr(__init__)
 
@@ -55,29 +57,33 @@ class Communication(Generic[_T]):
                                          maxlen=10)
         self._messages[node_id] = asyncio.Queue()
         self._results[node_id] = {path: asyncio.Queue() for path in self.paths}
-        self._senders[node_id] = self._loop.create_task(self._sender(node_id))
+        self._channels[node_id] = self._loop.create_task(
+                self._channel(node_id)
+        )
 
     def disconnect(self, node_id: NodeId) -> None:
-        self._senders.pop(node_id).cancel()
+        self._channels.pop(node_id).cancel()
         del (self._messages[node_id],
              self._latencies[node_id],
              self._results[node_id])
 
-    async def send(self, to: NodeId, path: _T, message: Any) -> Any:
-        self._messages[to].put_nowait((path, message))
-        result: Result = await self._results[to][path].get()
+    async def send(self, receiver: NodeId, path: _T, message: Any) -> Any:
+        assert path in self.paths
+        self._messages[receiver].put_nowait((path, message))
+        result: Result = await self._results[receiver][path].get()
         return result.value
 
-    async def _sender(self, to: NodeId) -> None:
-        url = self.configuration.nodes_urls[to]
-        messages, results, latencies = (self._messages[to], self._results[to],
-                                        self._latencies[to])
+    async def _channel(self, receiver: NodeId) -> None:
+        receiver_url = self.configuration.nodes_urls[receiver]
+        messages, results, latencies = (self._messages[receiver],
+                                        self._results[receiver],
+                                        self._latencies[receiver])
         path, message = await messages.get()
         to_time = self._loop.time
         while True:
             try:
                 async with self._session.ws_connect(
-                        url,
+                        receiver_url,
                         method=self.HTTP_METHOD,
                         timeout=self.configuration.heartbeat,
                         heartbeat=self.configuration.heartbeat) as connection:
