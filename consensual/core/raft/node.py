@@ -174,7 +174,8 @@ class Node:
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
         self._app = web.Application()
-        self._communication = Communication(self.configuration, list(CallPath))
+        self._communication: Communication[CallPath] = Communication(
+                self.configuration, list(CallPath))
         self._commands_executor = ThreadPoolExecutor(max_workers=1)
         self._election_duration = 0
         self._election_task = self._loop.create_future()
