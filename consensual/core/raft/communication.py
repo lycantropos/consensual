@@ -52,6 +52,12 @@ class Communication(Generic[_T]):
     def paths(self) -> Collection[_T]:
         return self._paths
 
+    async def send(self, receiver: NodeId, path: _T, message: Any) -> Any:
+        assert path in self.paths
+        self._messages[receiver].put_nowait((path, message))
+        result: Result = await self._results[receiver][path].get()
+        return result.value
+
     def connect(self, node_id: NodeId) -> None:
         self._latencies[node_id] = deque([0],
                                          maxlen=10)
@@ -67,11 +73,8 @@ class Communication(Generic[_T]):
              self._latencies[node_id],
              self._results[node_id])
 
-    async def send(self, receiver: NodeId, path: _T, message: Any) -> Any:
-        assert path in self.paths
-        self._messages[receiver].put_nowait((path, message))
-        result: Result = await self._results[receiver][path].get()
-        return result.value
+    def to_expected_broadcast_time(self) -> float:
+        return sum(max(latencies) for latencies in self._latencies.values())
 
     async def _channel(self, receiver: NodeId) -> None:
         receiver_url = self.configuration.nodes_urls[receiver]
@@ -103,9 +106,6 @@ class Communication(Generic[_T]):
             except (ClientError, OSError) as exception:
                 results[path].put_nowait(Error(exception))
                 path, message = await messages.get()
-
-    def to_expected_broadcast_time(self) -> float:
-        return sum(max(latencies) for latencies in self._latencies.values())
 
 
 def update_communication_configuration(communication: Communication,
