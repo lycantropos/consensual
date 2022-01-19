@@ -24,7 +24,7 @@ from .cluster_configuration import (AnyClusterConfiguration,
                                     TransitionalClusterConfiguration)
 from .communication import (Communication,
                             update_communication_configuration)
-from .event import Event
+from .command import Command
 from .hints import (NodeId,
                     Processor,
                     Protocol,
@@ -60,11 +60,11 @@ class CallPath(enum.IntEnum):
 
 @dataclasses.dataclass(frozen=True)
 class LogCall:
-    event: Event
+    command: Command
 
     @classmethod
-    def from_json(cls, event: Dict[str, Any]) -> 'LogCall':
-        return cls(Event(**event))
+    def from_json(cls, command: Dict[str, Any]) -> 'LogCall':
+        return cls(Command(**command))
 
     def as_json(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -153,7 +153,7 @@ class VoteReply:
 
 
 class Node:
-    __slots__ = ('_app', '_events_executor', '_communication',
+    __slots__ = ('_app', '_commands_executor', '_communication',
                  '_configuration', '_election_duration', '_election_task',
                  '_id', '_last_heartbeat_time', '_logger', '_loop',
                  '_patch_routes', '_processors', '_reelection_lag',
@@ -173,7 +173,7 @@ class Node:
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
         self._app = web.Application()
-        self._events_executor = ThreadPoolExecutor(max_workers=1)
+        self._commands_executor = ThreadPoolExecutor(max_workers=1)
         self._communication: Communication[CallPath] = Communication(
                 self.configuration, list(CallPath))
         self._election_duration = 0
@@ -283,8 +283,8 @@ class Node:
     async def _handle_record(self, request: web.Request) -> web.Response:
         parameters = await request.json()
         reply = await self._process_log_call(
-                LogCall(Event(action=request.path,
-                              parameters=parameters)))
+                LogCall(Command(action=request.path,
+                                parameters=parameters)))
         return web.json_response(reply.as_json())
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
@@ -326,7 +326,7 @@ class Node:
         if self.state.leader_node_id is None:
             return LogReply(error=f'{self.id} has no leader')
         elif self.state.role is Role.LEADER:
-            self.state.log.append(Record(call.event, self.state.term))
+            self.state.log.append(Record(call.command, self.state.term))
             await self._sync_followers_once()
             assert self.state.accepted_lengths[self.id] == len(self.state.log)
             return LogReply(error=None)
@@ -404,8 +404,8 @@ class Node:
         transitional_configuration = TransitionalClusterConfiguration(
                 self.configuration, call.configuration)
         self.state.log.append(Record(
-                Event(action=START_CONFIGURATION_UPDATE_ACTION,
-                      parameters=transitional_configuration.as_json()),
+                Command(action=START_CONFIGURATION_UPDATE_ACTION,
+                        parameters=transitional_configuration.as_json()),
                 self.state.term))
         self._update_configuration(transitional_configuration)
         await self._sync_followers_once()
@@ -519,15 +519,15 @@ class Node:
         if prefix_length + len(suffix) > len(log):
             new_records = suffix[len(log) - prefix_length:]
             for record in reversed(new_records):
-                event = record.event
-                if event.action == START_CONFIGURATION_UPDATE_ACTION:
+                command = record.command
+                if command.action == START_CONFIGURATION_UPDATE_ACTION:
                     configuration = TransitionalClusterConfiguration.from_json(
-                            **event.parameters)
+                            **command.parameters)
                     self._update_configuration(configuration)
                     break
-                elif event.action == END_CONFIGURATION_UPDATE_ACTION:
+                elif command.action == END_CONFIGURATION_UPDATE_ACTION:
                     configuration = StableClusterConfiguration.from_json(
-                            **event.parameters)
+                            **command.parameters)
                     self._update_configuration(configuration)
                     break
             log.extend(new_records)
@@ -584,12 +584,13 @@ class Node:
         self._start_sync_timer()
 
     def _process_records(self, records: List[Record]) -> None:
-        self._loop.run_in_executor(self._events_executor, self._process_events,
-                                   [record.event for record in records])
+        self._loop.run_in_executor(self._commands_executor,
+                                   self._process_commands,
+                                   [record.command for record in records])
 
-    def _process_events(self, events: List[Event]) -> None:
-        for event in events:
-            self.processors[event.action](self, event.parameters)
+    def _process_commands(self, commands: List[Command]) -> None:
+        for command in commands:
+            self.processors[command.action](self, command.parameters)
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self.id} restarts election timer '
@@ -613,8 +614,8 @@ class Node:
                     **parameters)
             assert configuration == self.configuration
             self.state.log.append(Record(
-                    Event(action=END_CONFIGURATION_UPDATE_ACTION,
-                          parameters=configuration.new.as_json()),
+                    Command(action=END_CONFIGURATION_UPDATE_ACTION,
+                            parameters=configuration.new.as_json()),
                     self.state.term))
             self._update_configuration(configuration.new)
             self._restart_sync_timer()

@@ -1,4 +1,4 @@
-from .core.raft import (Event,
+from .core.raft import (Command,
                         Node,
                         NodeId,
                         NodeState,
@@ -8,7 +8,7 @@ from .core.raft import (Event,
                         Term,
                         TransitionalClusterConfiguration)
 
-Event = Event
+Command = Command
 Node = Node
 NodeId = NodeId
 NodeState = NodeState

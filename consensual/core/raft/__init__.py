@@ -1,6 +1,6 @@
 from .cluster_configuration import (StableClusterConfiguration,
                                     TransitionalClusterConfiguration)
-from .event import Event
+from .command import Command
 from .hints import (NodeId,
                     Processor,
                     Term)
