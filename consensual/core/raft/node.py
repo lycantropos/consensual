@@ -167,15 +167,46 @@ class SyncCall:
                 'term': self.term}
 
 
-@dataclasses.dataclass(frozen=True)
 class SyncReply:
-    node_id: NodeId
-    term: Term
-    accepted_length: int
-    successful: bool
+    __slots__ = '_accepted_length', '_node_id', '_successful', '_term'
+
+    def __new__(cls,
+                *,
+                accepted_length: int,
+                node_id: NodeId,
+                successful: bool,
+                term: Term) -> 'SyncReply':
+        self = super().__new__(cls)
+        self._accepted_length, self._node_id, self._successful, self._term = (
+            accepted_length, node_id, successful, term
+        )
+        return self
+
+    __repr__ = generate_repr(__new__)
+
+    @property
+    def accepted_length(self) -> int:
+        return self._accepted_length
+
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
+    @property
+    def successful(self) -> bool:
+        return self._successful
+
+    @property
+    def term(self) -> Term:
+        return self._term
+
+    from_json = classmethod(__new__)
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'accepted_length': self.accepted_length,
+                'node_id': self.node_id,
+                'successful': self.successful,
+                'term': self.term}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -373,7 +404,7 @@ class Node:
                              accepted_length=0,
                              successful=False)
         else:
-            return SyncReply(**raw_reply)
+            return SyncReply.from_json(**raw_reply)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
         call = VoteCall(node_id=self.id,
