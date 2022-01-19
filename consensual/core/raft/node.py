@@ -22,9 +22,9 @@ from yarl import URL
 from .cluster_configuration import (AnyClusterConfiguration,
                                     StableClusterConfiguration,
                                     TransitionalClusterConfiguration)
+from .command import Command
 from .communication import (Communication,
                             update_communication_configuration)
-from .command import Command
 from .hints import (NodeId,
                     Processor,
                     Protocol,
