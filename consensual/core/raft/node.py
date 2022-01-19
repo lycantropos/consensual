@@ -569,6 +569,9 @@ class Node:
                 **parameters))
         if self.id not in self.configuration.nodes_ids:
             self.state.role = Role.FOLLOWER
+            self._cancel_election_timer()
+            self._cancel_reelection_timer()
+            self._cancel_sync_timer()
 
     def _lead(self) -> None:
         self.logger.info(f'{self.id} is leader of term {self.state.term}')
