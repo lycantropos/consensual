@@ -19,11 +19,11 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
+from .cluster_configuration import (AnyClusterConfiguration,
+                                    StableClusterConfiguration,
+                                    TransitionalClusterConfiguration)
 from .communication import (Communication,
                             update_communication_configuration)
-from .configuration import (AnyClusterConfiguration,
-                            StableClusterConfiguration,
-                            TransitionalClusterConfiguration)
 from .event import Event
 from .hints import (NodeId,
                     Processor,

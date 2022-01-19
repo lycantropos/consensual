@@ -12,7 +12,7 @@ from aiohttp import (ClientError,
                      web_ws)
 from reprit.base import generate_repr
 
-from .configuration import AnyClusterConfiguration
+from .cluster_configuration import AnyClusterConfiguration
 from .hints import NodeId
 from .utils import (Error,
                     Ok,
