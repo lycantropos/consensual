@@ -413,13 +413,18 @@ class Node:
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self.id} processes {call}')
-        leader_may_be_alive = (self.state.leader_node_id is not None
-                               and (self._to_time() - self._last_heartbeat_time
-                                    < self.configuration.heartbeat))
-        if leader_may_be_alive:
-            self.logger.debug(f'{self.id} leader {self.state.leader_node_id} '
-                              f'can be alive, '
-                              f'skipping voting for {call.node_id}')
+        if call.node_id not in self.configuration.nodes_ids:
+            self.logger.debug(f'{self.id} skips voting for {call.node_id} '
+                              f'because it is not in configuration')
+            return VoteReply(node_id=self.id,
+                             term=self.state.term,
+                             supports=False)
+        elif (self.state.leader_node_id is not None
+              and (self._to_time() - self._last_heartbeat_time
+                   < self.configuration.heartbeat)):
+            self.logger.debug(f'{self.id} skips voting for {call.node_id} '
+                              f'because leader {self.state.leader_node_id} '
+                              f'can be alive')
             return VoteReply(node_id=self.id,
                              term=self.state.term,
                              supports=False)
