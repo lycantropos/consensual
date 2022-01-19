@@ -78,26 +78,73 @@ class LogReply:
         return dataclasses.asdict(self)
 
 
-@dataclasses.dataclass(frozen=True)
 class SyncCall:
-    node_id: NodeId
-    term: Term
-    prefix_length: int
-    prefix_term: Term
-    commit_length: int
-    suffix: List[Record]
+    __slots__ = ('_commit_length', '_node_id', '_prefix_length',
+                 '_prefix_term', '_suffix', '_term')
+
+    def __init__(self,
+                 *,
+                 commit_length: int,
+                 node_id: NodeId,
+                 prefix_length: int,
+                 prefix_term: Term,
+                 suffix: List[Record],
+                 term: Term) -> None:
+        (
+            self._commit_length, self._node_id, self._prefix_length,
+            self._prefix_term, self._suffix, self._term
+        ) = commit_length, node_id, prefix_length, prefix_term, suffix, term
+
+    __repr__ = generate_repr(__init__)
+
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
+    @property
+    def term(self) -> Term:
+        return self._term
+
+    @property
+    def prefix_length(self) -> int:
+        return self._prefix_length
+
+    @property
+    def prefix_term(self) -> Term:
+        return self._prefix_term
+
+    @property
+    def commit_length(self) -> int:
+        return self._commit_length
+
+    @property
+    def suffix(self) -> List[Record]:
+        return self._suffix
 
     @classmethod
     def from_json(cls,
                   *,
+                  commit_length: int,
+                  node_id: NodeId,
+                  prefix_length: int,
+                  prefix_term: Term,
                   suffix: List[Dict[str, Any]],
-                  **kwargs: Any) -> 'SyncCall':
-        return cls(suffix=[Record.from_json(**raw_record)
+                  term: Term) -> 'SyncCall':
+        return cls(commit_length=commit_length,
+                   node_id=node_id,
+                   prefix_length=prefix_length,
+                   prefix_term=prefix_term,
+                   suffix=[Record.from_json(**raw_record)
                            for raw_record in suffix],
-                   **kwargs)
+                   term=term)
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'commit_length': self.commit_length,
+                'node_id': self.node_id,
+                'prefix_length': self.prefix_length,
+                'prefix_term': self.prefix_term,
+                'suffix': self.suffix,
+                'term': self.term}
 
 
 @dataclasses.dataclass(frozen=True)
