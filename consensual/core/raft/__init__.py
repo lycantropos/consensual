@@ -1,4 +1,5 @@
-from .configuration import ClusterConfiguration
+from .configuration import (StableClusterConfiguration,
+                            TransitionalClusterConfiguration)
 from .event import Event
 from .hints import (NodeId,
                     Processor,

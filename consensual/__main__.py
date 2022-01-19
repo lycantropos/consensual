@@ -8,10 +8,10 @@ from typing import (Any,
 import click
 from yarl import URL
 
-from .raft import (ClusterConfiguration,
-                   Node,
+from .raft import (Node,
                    NodeId,
-                   NodeState)
+                   NodeState,
+                   StableClusterConfiguration)
 
 
 def to_logger(name: str,
@@ -56,7 +56,7 @@ def to_logger(name: str,
 def main(index: int, passive: bool, urls: List[URL]) -> None:
     node_id = url_to_node_id(urls[index])
     nodes_urls = dict(zip(map(url_to_node_id, urls), urls))
-    configuration = ClusterConfiguration(
+    configuration = StableClusterConfiguration(
             nodes_urls,
             active_nodes_ids=(nodes_urls.keys()
                               - ({node_id} if passive else set())))

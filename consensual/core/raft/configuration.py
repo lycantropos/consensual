@@ -12,7 +12,7 @@ from .hints import (NodeId,
                     Time)
 
 
-class ClusterConfiguration:
+class StableClusterConfiguration:
     def __init__(self,
                  nodes_urls: Mapping[NodeId, URL],
                  *,
@@ -30,7 +30,7 @@ class ClusterConfiguration:
         return ((self.heartbeat == other.heartbeat
                  and self.nodes_urls == other.nodes_urls
                  and self.active_nodes_ids == other.active_nodes_ids)
-                if isinstance(other, ClusterConfiguration)
+                if isinstance(other, StableClusterConfiguration)
                 else NotImplemented)
 
     @property
@@ -52,7 +52,7 @@ class ClusterConfiguration:
     @classmethod
     def from_json(cls,
                   nodes_urls: Dict[NodeId, str],
-                  **kwargs: Any) -> 'ClusterConfiguration':
+                  **kwargs: Any) -> 'StableClusterConfiguration':
         return cls({node_id: URL(raw_node_url)
                     for node_id, raw_node_url in nodes_urls.items()},
                    **kwargs)
@@ -76,8 +76,8 @@ class ClusterConfiguration:
 
 class TransitionalClusterConfiguration:
     def __init__(self,
-                 old: ClusterConfiguration,
-                 new: ClusterConfiguration) -> None:
+                 old: StableClusterConfiguration,
+                 new: StableClusterConfiguration) -> None:
         self._new, self._old = new, old
 
     __repr__ = generate_repr(__init__)
@@ -96,7 +96,7 @@ class TransitionalClusterConfiguration:
         return self.new.heartbeat
 
     @property
-    def new(self) -> ClusterConfiguration:
+    def new(self) -> StableClusterConfiguration:
         return self._new
 
     @property
@@ -108,7 +108,7 @@ class TransitionalClusterConfiguration:
         return {**self.old.nodes_urls, **self.new.nodes_urls}
 
     @property
-    def old(self) -> ClusterConfiguration:
+    def old(self) -> StableClusterConfiguration:
         return self._old
 
     @classmethod
@@ -116,8 +116,8 @@ class TransitionalClusterConfiguration:
                   *,
                   old: Dict[str, Any],
                   new: Dict[str, Any]) -> 'TransitionalClusterConfiguration':
-        return cls(old=ClusterConfiguration.from_json(**old),
-                   new=ClusterConfiguration.from_json(**new))
+        return cls(old=StableClusterConfiguration.from_json(**old),
+                   new=StableClusterConfiguration.from_json(**new))
 
     def activate(self, node_id: NodeId) -> None:
         self.new.activate(node_id)
@@ -130,7 +130,7 @@ class TransitionalClusterConfiguration:
                 and self.new.has_majority(nodes_ids))
 
 
-AnyClusterConfiguration = Union[ClusterConfiguration,
+AnyClusterConfiguration = Union[StableClusterConfiguration,
                                 TransitionalClusterConfiguration]
 
 

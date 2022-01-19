@@ -22,7 +22,7 @@ from yarl import URL
 from .communication import (Communication,
                             update_communication_configuration)
 from .configuration import (AnyClusterConfiguration,
-                            ClusterConfiguration,
+                            StableClusterConfiguration,
                             TransitionalClusterConfiguration)
 from .event import Event
 from .hints import (NodeId,
@@ -114,14 +114,14 @@ class SyncReply:
 
 @dataclasses.dataclass(frozen=True)
 class UpdateCall:
-    configuration: ClusterConfiguration
+    configuration: StableClusterConfiguration
 
     def as_json(self) -> Dict[str, Any]:
         return {'configuration': self.configuration.as_json()}
 
     @classmethod
     def from_json(cls, configuration: Dict[str, Any]) -> 'UpdateCall':
-        return cls(ClusterConfiguration.from_json(**configuration))
+        return cls(StableClusterConfiguration.from_json(**configuration))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -163,7 +163,7 @@ class Node:
     def __init__(self,
                  id_: NodeId,
                  state: NodeState,
-                 configuration: ClusterConfiguration,
+                 configuration: AnyClusterConfiguration,
                  *,
                  logger: Optional[logging.Logger] = None,
                  processors: Dict[str, Processor]) -> None:
@@ -263,7 +263,7 @@ class Node:
         self.logger.debug(f'{self.id} gets removed')
         rest_nodes_urls = dict(self.configuration.nodes_urls)
         del rest_nodes_urls[self.id]
-        call = UpdateCall(ClusterConfiguration(
+        call = UpdateCall(StableClusterConfiguration(
                 rest_nodes_urls,
                 heartbeat=self.configuration.heartbeat))
         reply = await self._process_update_call(call)
@@ -286,7 +286,7 @@ class Node:
         self.logger.debug('{id} adds {nodes_ids}'
                           .format(id=self.id,
                                   nodes_ids=', '.join(nodes_urls_to_add)))
-        call = UpdateCall(ClusterConfiguration(
+        call = UpdateCall(StableClusterConfiguration(
                 {**self.configuration.nodes_urls, **nodes_urls_to_add},
                 heartbeat=self.configuration.heartbeat))
         reply = await self._process_update_call(call)
@@ -542,7 +542,7 @@ class Node:
                     self._update_configuration(configuration)
                     break
                 elif event.action == END_CONFIGURATION_UPDATE_ACTION:
-                    configuration = ClusterConfiguration.from_json(
+                    configuration = StableClusterConfiguration.from_json(
                             **event.parameters)
                     self._update_configuration(configuration)
                     break
@@ -580,12 +580,12 @@ class Node:
 
     def _end_configuration_update(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self.id} ends configuration update')
-        assert isinstance(self.configuration, ClusterConfiguration)
-        assert (self.configuration == ClusterConfiguration.from_json(
+        assert isinstance(self.configuration, StableClusterConfiguration)
+        assert (self.configuration == StableClusterConfiguration.from_json(
                 **parameters))
         if self.id not in self.configuration.nodes_ids:
             self.state.role = Role.FOLLOWER
-            self._update_configuration(ClusterConfiguration(
+            self._update_configuration(StableClusterConfiguration(
                     {self.id: self.configuration.nodes_urls[self.id]},
                     active_nodes_ids=set(),
                     heartbeat=self.configuration.heartbeat))
