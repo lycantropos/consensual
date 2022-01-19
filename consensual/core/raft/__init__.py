@@ -1,8 +1,8 @@
-from .node import Node
-from .command import Command
 from .configuration import ClusterConfiguration
+from .event import Event
 from .hints import (NodeId,
                     Processor,
                     Term)
+from .node import Node
 from .node_state import NodeState
 from .record import Record

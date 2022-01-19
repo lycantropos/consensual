@@ -1,5 +1,5 @@
 from .core.raft import (ClusterConfiguration,
-                        Command,
+                        Event,
                         Node,
                         NodeId,
                         NodeState,
@@ -7,8 +7,8 @@ from .core.raft import (ClusterConfiguration,
                         Record,
                         Term)
 
-Command = Command
 ClusterConfiguration = ClusterConfiguration
+Event = Event
 Node = Node
 NodeId = NodeId
 NodeState = NodeState

@@ -7,6 +7,6 @@ _T = TypeVar('_T')
 
 
 @dataclasses.dataclass(frozen=True)
-class Command(Generic[_T]):
-    path: str
+class Event(Generic[_T]):
+    action: str
     parameters: Any

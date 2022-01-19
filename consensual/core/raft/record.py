@@ -2,19 +2,16 @@ import dataclasses
 from typing import (Any,
                     Dict)
 
-from .command import Command
+from .event import Event
 from .hints import Term
 
 
 @dataclasses.dataclass(frozen=True)
 class Record:
-    command: Command
+    event: Event
     term: Term
 
     @classmethod
-    def from_json(cls,
-                  *,
-                  command: Dict[str, Any],
-                  term: Term) -> 'Record':
-        return cls(command=Command(**command),
+    def from_json(cls, *, event: Dict[str, Any], term: Term) -> 'Record':
+        return cls(event=Event(**event),
                    term=term)

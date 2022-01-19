@@ -19,12 +19,12 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-from .command import Command
 from .communication import (Communication,
                             update_communication_configuration)
 from .configuration import (AnyClusterConfiguration,
                             ClusterConfiguration,
                             TransitionalClusterConfiguration)
+from .event import Event
 from .hints import (NodeId,
                     Processor,
                     Protocol,
@@ -39,12 +39,12 @@ from .record import Record
 from .utils import format_exception
 
 NODE_IS_PASSIVE_ERROR = web.HTTPBadRequest(reason='node is passive')
-START_CONFIGURATION_UPDATE_COMMAND_PATH = '0'
-END_CONFIGURATION_UPDATE_COMMAND_PATH = '1'
-assert (START_CONFIGURATION_UPDATE_COMMAND_PATH
-        and not START_CONFIGURATION_UPDATE_COMMAND_PATH.startswith('/'))
-assert (END_CONFIGURATION_UPDATE_COMMAND_PATH
-        and not END_CONFIGURATION_UPDATE_COMMAND_PATH.startswith('/'))
+START_CONFIGURATION_UPDATE_ACTION = '0'
+END_CONFIGURATION_UPDATE_ACTION = '1'
+assert (START_CONFIGURATION_UPDATE_ACTION
+        and not START_CONFIGURATION_UPDATE_ACTION.startswith('/'))
+assert (END_CONFIGURATION_UPDATE_ACTION
+        and not END_CONFIGURATION_UPDATE_ACTION.startswith('/'))
 
 
 class Call(Protocol):
@@ -61,11 +61,11 @@ class CallPath(enum.IntEnum):
 
 @dataclasses.dataclass(frozen=True)
 class LogCall:
-    command: Command
+    event: Event
 
     @classmethod
-    def from_json(cls, command: Dict[str, Any]) -> 'LogCall':
-        return cls(Command(**command))
+    def from_json(cls, event: Dict[str, Any]) -> 'LogCall':
+        return cls(Event(**event))
 
     def as_json(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -154,7 +154,7 @@ class VoteReply:
 
 
 class Node:
-    __slots__ = ('_app', '_commands_executor', '_communication',
+    __slots__ = ('_app', '_events_executor', '_communication',
                  '_configuration', '_election_duration', '_election_task',
                  '_id', '_last_heartbeat_time', '_logger', '_loop',
                  '_patch_routes', '_processors', '_reelection_lag',
@@ -174,7 +174,7 @@ class Node:
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
         self._app = web.Application()
-        self._commands_executor = ThreadPoolExecutor(max_workers=1)
+        self._events_executor = ThreadPoolExecutor(max_workers=1)
         self._communication: Communication[CallPath] = Communication(
                 self.configuration, list(CallPath))
         self._election_duration = 0
@@ -195,9 +195,9 @@ class Node:
         self._processors = processors
         for path in self.processors.keys():
             self._app.router.add_post(path, self._handle_record)
-        self._processors[START_CONFIGURATION_UPDATE_COMMAND_PATH] = (
+        self._processors[START_CONFIGURATION_UPDATE_ACTION] = (
             Node._start_configuration_update)
-        self._processors[END_CONFIGURATION_UPDATE_COMMAND_PATH] = (
+        self._processors[END_CONFIGURATION_UPDATE_ACTION] = (
             Node._end_configuration_update)
 
     __repr__ = generate_repr(__init__,
@@ -297,8 +297,8 @@ class Node:
             raise NODE_IS_PASSIVE_ERROR
         parameters = await request.json()
         reply = await self._process_log_call(
-                LogCall(Command(path=request.path,
-                                parameters=parameters)))
+                LogCall(Event(action=request.path,
+                              parameters=parameters)))
         return web.json_response(reply.as_json())
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
@@ -340,7 +340,7 @@ class Node:
         if self.state.leader_node_id is None:
             return LogReply(error=f'{self.id} has no leader')
         elif self.state.role is Role.LEADER:
-            self.state.log.append(Record(call.command, self.state.term))
+            self.state.log.append(Record(call.event, self.state.term))
             await self._sync_followers_once()
             assert self.state.accepted_lengths[self.id] == len(self.state.log)
             return LogReply(error=None)
@@ -424,8 +424,8 @@ class Node:
         transitional_configuration = TransitionalClusterConfiguration(
                 self.configuration, call.configuration)
         self.state.log.append(Record(
-                Command(path=START_CONFIGURATION_UPDATE_COMMAND_PATH,
-                        parameters=transitional_configuration.as_json()),
+                Event(action=START_CONFIGURATION_UPDATE_ACTION,
+                      parameters=transitional_configuration.as_json()),
                 self.state.term))
         self._update_configuration(transitional_configuration)
         await self._sync_followers_once()
@@ -535,15 +535,15 @@ class Node:
         if prefix_length + len(suffix) > len(log):
             new_records = suffix[len(log) - prefix_length:]
             for record in reversed(new_records):
-                command = record.command
-                if command.path == START_CONFIGURATION_UPDATE_COMMAND_PATH:
+                event = record.event
+                if event.action == START_CONFIGURATION_UPDATE_ACTION:
                     configuration = TransitionalClusterConfiguration.from_json(
-                            **command.parameters)
+                            **event.parameters)
                     self._update_configuration(configuration)
                     break
-                elif command.path == END_CONFIGURATION_UPDATE_COMMAND_PATH:
+                elif event.action == END_CONFIGURATION_UPDATE_ACTION:
                     configuration = ClusterConfiguration.from_json(
-                            **command.parameters)
+                            **event.parameters)
                     self._update_configuration(configuration)
                     break
             log.extend(new_records)
@@ -601,13 +601,12 @@ class Node:
         self._start_sync_timer()
 
     def _process_records(self, records: List[Record]) -> None:
-        self._loop.run_in_executor(self._commands_executor,
-                                   self._process_commands,
-                                   [record.command for record in records])
+        self._loop.run_in_executor(self._events_executor, self._process_events,
+                                   [record.event for record in records])
 
-    def _process_commands(self, commands: List[Command]) -> None:
-        for command in commands:
-            self.processors[command.path](self, command.parameters)
+    def _process_events(self, events: List[Event]) -> None:
+        for event in events:
+            self.processors[event.action](self, event.parameters)
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self.id} restarts election timer '
@@ -634,8 +633,8 @@ class Node:
                     **parameters)
             assert configuration == self.configuration
             self.state.log.append(Record(
-                    Command(path=END_CONFIGURATION_UPDATE_COMMAND_PATH,
-                            parameters=configuration.new.as_json()),
+                    Event(action=END_CONFIGURATION_UPDATE_ACTION,
+                          parameters=configuration.new.as_json()),
                     self.state.term))
             self._update_configuration(configuration.new)
             self._restart_sync_timer()
