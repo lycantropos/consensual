@@ -47,19 +47,14 @@ def to_logger(name: str,
 @click.option('--index',
               required=True,
               type=int)
-@click.option('--passive',
-              is_flag=True)
 @click.argument('urls',
                 required=True,
                 type=URL,
                 nargs=-1)
-def main(index: int, passive: bool, urls: List[URL]) -> None:
+def main(index: int, urls: List[URL]) -> None:
     node_id = url_to_node_id(urls[index])
     nodes_urls = dict(zip(map(url_to_node_id, urls), urls))
-    configuration = StableClusterConfiguration(
-            nodes_urls,
-            active_nodes_ids=(nodes_urls.keys()
-                              - ({node_id} if passive else set())))
+    configuration = StableClusterConfiguration(nodes_urls)
     Node(node_id, NodeState(configuration.nodes_ids), configuration,
          logger=to_logger(str(node_id)),
          processors={'/log': process_log}).run()

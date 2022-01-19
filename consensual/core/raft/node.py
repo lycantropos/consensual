@@ -38,7 +38,6 @@ from .node_state import (NodeState,
 from .record import Record
 from .utils import format_exception
 
-NODE_IS_PASSIVE_ERROR = web.HTTPBadRequest(reason='node is passive')
 START_CONFIGURATION_UPDATE_ACTION = '0'
 END_CONFIGURATION_UPDATE_ACTION = '1'
 assert (START_CONFIGURATION_UPDATE_ACTION
@@ -231,11 +230,6 @@ class Node:
                     port=url.port,
                     loop=self._loop)
 
-    @property
-    def _passive(self) -> bool:
-        return (self.id in self.configuration.nodes_ids
-                and self.id not in self.configuration.active_nodes_ids)
-
     async def _agitate_voter(self, node_id: NodeId) -> None:
         reply = await self._call_vote(node_id)
         await self._process_vote_reply(reply)
@@ -249,8 +243,6 @@ class Node:
             message: web_ws.WSMessage
             raw_call = message.json()
             call_path = CallPath(raw_call['path'])
-            if self._passive and call_path is not CallPath.SYNC:
-                raise NODE_IS_PASSIVE_ERROR
             call_cls, processor = routes[call_path]
             call = call_cls(**raw_call['message'])
             reply = await processor(call)
@@ -258,8 +250,6 @@ class Node:
         return websocket
 
     async def _handle_delete(self, request: web.Request) -> web.Response:
-        if self._passive:
-            raise NODE_IS_PASSIVE_ERROR
         self.logger.debug(f'{self.id} gets removed')
         rest_nodes_urls = dict(self.configuration.nodes_urls)
         del rest_nodes_urls[self.id]
@@ -270,8 +260,6 @@ class Node:
         return web.json_response(reply.as_json())
 
     async def _handle_post(self, request: web.Request) -> web.Response:
-        if self._passive:
-            raise NODE_IS_PASSIVE_ERROR
         raw_nodes_urls_to_add = await request.json()
         nodes_urls_to_add = {
             node_id: URL(raw_node_url)
@@ -293,8 +281,6 @@ class Node:
         return web.json_response(reply.as_json())
 
     async def _handle_record(self, request: web.Request) -> web.Response:
-        if self._passive:
-            raise NODE_IS_PASSIVE_ERROR
         parameters = await request.json()
         reply = await self._process_log_call(
                 LogCall(Event(action=request.path,
@@ -373,8 +359,6 @@ class Node:
             if call.commit_length > self.state.commit_length:
                 self._commit(self.state.log[self.state.commit_length
                                             :call.commit_length])
-            if self._passive:
-                self.configuration.activate(self.id)
             return SyncReply(node_id=self.id,
                              term=self.state.term,
                              accepted_length=(call.prefix_length
@@ -392,10 +376,6 @@ class Node:
             if (reply.successful
                     and (reply.accepted_length
                          >= self.state.accepted_lengths[reply.node_id])):
-                if (reply.node_id not in self.configuration.nodes_ids
-                        and (reply.node_id
-                             not in self.configuration.active_nodes_ids)):
-                    self.configuration.activate(reply.node_id)
                 self.state.accepted_lengths[reply.node_id] = (
                     reply.accepted_length)
                 self.state.sent_lengths[reply.node_id] = reply.accepted_length
@@ -485,7 +465,7 @@ class Node:
             await asyncio.wait_for(
                     asyncio.gather(*[self._agitate_voter(node_id)
                                      for node_id
-                                     in self.configuration.active_nodes_ids]),
+                                     in self.configuration.nodes_ids]),
                     self._election_duration)
         finally:
             duration = self._to_time() - start
@@ -494,8 +474,7 @@ class Node:
                               f'timeout: {self._election_duration}, '
                               f'role: {self.state.role.name}, '
                               f'supporters count: '
-                              f'{len(self.state.supporters_nodes_ids)}'
-                              f'/{len(self.configuration.active_nodes_ids)}')
+                              f'{len(self.state.supporters_nodes_ids)}')
             await asyncio.sleep(self._election_duration - duration)
 
     async def _send_call(self,
@@ -585,10 +564,6 @@ class Node:
                 **parameters))
         if self.id not in self.configuration.nodes_ids:
             self.state.role = Role.FOLLOWER
-            self._update_configuration(StableClusterConfiguration(
-                    {self.id: self.configuration.nodes_urls[self.id]},
-                    active_nodes_ids=set(),
-                    heartbeat=self.configuration.heartbeat))
 
     def _lead(self) -> None:
         self.logger.info(f'{self.id} is leader of term {self.state.term}')
@@ -611,9 +586,6 @@ class Node:
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self.id} restarts election timer '
                           f'after {self._reelection_lag}')
-        if self._passive:
-            self.logger.debug(f'{self.id} is passive, not running election')
-            return
         self._cancel_election_timer()
         self._start_election_timer()
 
