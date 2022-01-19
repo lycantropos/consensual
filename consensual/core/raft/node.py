@@ -78,12 +78,24 @@ class LogCall:
         return {'command': self.command.as_json()}
 
 
-@dataclasses.dataclass(frozen=True)
 class LogReply:
-    error: Optional[str]
+    __slots__ = '_error',
+
+    def __init__(self, error: Optional[str]) -> None:
+        self._error = error
+
+    __repr__ = generate_repr(__init__)
+
+    @property
+    def error(self) -> Optional[str]:
+        return self._error
+
+    @classmethod
+    def from_json(cls, error: Optional[str]) -> 'LogReply':
+        return cls(error)
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'error': self.error}
 
 
 class SyncCall:
@@ -394,7 +406,7 @@ class Node:
             except (ClientError, OSError) as exception:
                 return LogReply(error=format_exception(exception))
             else:
-                return LogReply(**raw_reply)
+                return LogReply.from_json(**raw_reply)
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self.id} processes {call}')
