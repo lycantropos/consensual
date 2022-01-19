@@ -58,16 +58,24 @@ class CallPath(enum.IntEnum):
     VOTE = 3
 
 
-@dataclasses.dataclass(frozen=True)
 class LogCall:
-    command: Command
+    __slots__ = '_command',
+
+    def __init__(self, command: Command) -> None:
+        self._command = command
+
+    __repr__ = generate_repr(__init__)
+
+    @property
+    def command(self) -> Command:
+        return self._command
 
     @classmethod
     def from_json(cls, command: Dict[str, Any]) -> 'LogCall':
         return cls(Command(**command))
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'command': self.command.as_json()}
 
 
 @dataclasses.dataclass(frozen=True)
