@@ -81,18 +81,18 @@ class LogCall:
 class LogReply:
     __slots__ = '_error',
 
-    def __init__(self, error: Optional[str]) -> None:
+    def __new__(cls, error: Optional[str]) -> 'LogReply':
+        self = super().__new__(cls)
         self._error = error
+        return self
 
-    __repr__ = generate_repr(__init__)
+    __repr__ = generate_repr(__new__)
 
     @property
     def error(self) -> Optional[str]:
         return self._error
 
-    @classmethod
-    def from_json(cls, error: Optional[str]) -> 'LogReply':
-        return cls(error)
+    from_json = classmethod(__new__)
 
     def as_json(self) -> Dict[str, Any]:
         return {'error': self.error}
