@@ -642,7 +642,7 @@ class Node:
         while (state.commit_length < len(state.log)
                and self.configuration.has_majority(
                         state_to_nodes_ids_that_accepted_more_records(state))):
-            self._commit([self.state.log[self.state.commit_length]])
+            self._commit([state.log[state.commit_length]])
 
     def _update_configuration(self,
                               configuration: AnyClusterConfiguration) -> None:
