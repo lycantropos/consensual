@@ -630,7 +630,7 @@ class Node:
         assert (
                 broadcast_time < heartbeat
         ), (
-            f'broadcast time = {broadcast_time} < {heartbeat} = heartbeat'
+            f'broadcast time = {broadcast_time} >= {heartbeat} = heartbeat'
         )
         return heartbeat + random.uniform(broadcast_time, heartbeat)
 
