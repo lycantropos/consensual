@@ -14,8 +14,8 @@ from .hints import (NodeId,
 
 class StableClusterConfiguration:
     def __init__(self,
-                 nodes_urls: Mapping[NodeId, URL],
                  *,
+                 nodes_urls: Mapping[NodeId, URL],
                  heartbeat: Time = 5) -> None:
         self._heartbeat = heartbeat
         self._nodes_urls = nodes_urls
@@ -44,9 +44,11 @@ class StableClusterConfiguration:
     def from_json(cls,
                   nodes_urls: Dict[NodeId, str],
                   **kwargs: Any) -> 'StableClusterConfiguration':
-        return cls({node_id: URL(raw_node_url)
-                    for node_id, raw_node_url in nodes_urls.items()},
-                   **kwargs)
+        return cls(
+                nodes_urls={node_id: URL(raw_node_url)
+                            for node_id, raw_node_url in nodes_urls.items()},
+                **kwargs,
+        )
 
     def as_json(self) -> Dict[str, Any]:
         return {
