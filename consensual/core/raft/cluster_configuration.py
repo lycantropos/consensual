@@ -2,7 +2,6 @@ from typing import (Any,
                     Collection,
                     Dict,
                     Mapping,
-                    Optional,
                     Union)
 
 from reprit.base import generate_repr
