@@ -254,8 +254,8 @@ class Node:
         rest_nodes_urls = dict(self.configuration.nodes_urls)
         del rest_nodes_urls[self.id]
         call = UpdateCall(
-            StableClusterConfiguration(nodes_urls=rest_nodes_urls,
-                                       heartbeat=self.configuration.heartbeat))
+                StableClusterConfiguration(nodes_urls=rest_nodes_urls,
+                                           heartbeat=self.configuration.heartbeat))
         reply = await self._process_update_call(call)
         return web.json_response(reply.as_json())
 
@@ -275,8 +275,9 @@ class Node:
                           .format(id=self.id,
                                   nodes_ids=', '.join(nodes_urls_to_add)))
         call = UpdateCall(StableClusterConfiguration(
-            nodes_urls={**self.configuration.nodes_urls, **nodes_urls_to_add},
-            heartbeat=self.configuration.heartbeat))
+                nodes_urls={**self.configuration.nodes_urls,
+                            **nodes_urls_to_add},
+                heartbeat=self.configuration.heartbeat))
         reply = await self._process_update_call(call)
         return web.json_response(reply.as_json())
 
