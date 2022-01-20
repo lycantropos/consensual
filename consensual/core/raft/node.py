@@ -773,7 +773,7 @@ class Node:
 
     def _election_timer_callback(self, future: asyncio.Future) -> None:
         if future.cancelled():
-            self.logger.debug(f'{self.id} cancelled election')
+            self.logger.debug(f'{self.id} has election been cancelled')
             return
         exception = future.exception()
         if exception is None:
@@ -781,7 +781,7 @@ class Node:
             self._start_election_timer()
         elif isinstance(exception, asyncio.TimeoutError):
             future.cancel()
-            self.logger.debug(f'{self.id} timed out election')
+            self.logger.debug(f'{self.id} has election been timed out')
             self._start_election_timer()
         else:
             raise exception
