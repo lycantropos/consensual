@@ -507,7 +507,8 @@ class Node:
         if self.state.leader_node_id is None:
             return LogReply(error=f'{self.id} has no leader')
         elif self.state.role is Role.LEADER:
-            self.state.log.append(Record(call.command, self.state.term))
+            self.state.log.append(Record(command=call.command,
+                                         term=self.state.term))
             await self._sync_followers_once()
             assert self.state.accepted_lengths[self.id] == len(self.state.log)
             return LogReply(error=None)
@@ -585,9 +586,9 @@ class Node:
         transitional_configuration = TransitionalClusterConfiguration(
                 self.configuration, call.configuration)
         self.state.log.append(Record(
-                Command(action=START_CONFIGURATION_UPDATE_ACTION,
-                        parameters=transitional_configuration.as_json()),
-                self.state.term))
+                command=Command(action=START_CONFIGURATION_UPDATE_ACTION,
+                                parameters=transitional_configuration.as_json()),
+                term=self.state.term))
         self._update_configuration(transitional_configuration)
         await self._sync_followers_once()
         return UpdateReply(error=None)
@@ -795,9 +796,9 @@ class Node:
                     **parameters)
             assert configuration == self.configuration
             self.state.log.append(Record(
-                    Command(action=END_CONFIGURATION_UPDATE_ACTION,
-                            parameters=configuration.new.as_json()),
-                    self.state.term))
+                    command=Command(action=END_CONFIGURATION_UPDATE_ACTION,
+                                    parameters=configuration.new.as_json()),
+                    term=self.state.term))
             self._update_configuration(configuration.new)
             self._restart_sync_timer()
 
