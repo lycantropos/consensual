@@ -1,17 +1,13 @@
 import logging.config
 import random
+import socket
 import sys
 import time
-from typing import (Any,
-                    List)
+from typing import Any
 
 import click
-from yarl import URL
 
-from .raft import (Node,
-                   NodeId,
-                   NodeState,
-                   StableClusterState)
+from .raft import Node
 
 
 def to_logger(name: str,
@@ -44,19 +40,16 @@ def to_logger(name: str,
 
 
 @click.command()
-@click.option('--index',
+@click.option('--host',
+              default=socket.gethostbyname(socket.gethostname()),
+              type=str)
+@click.option('--port',
               required=True,
-              type=int)
-@click.argument('urls',
-                required=True,
-                type=URL,
-                nargs=-1)
-def main(index: int, urls: List[URL]) -> None:
-    node_id = url_to_node_id(urls[index])
-    nodes_urls = dict(zip(map(url_to_node_id, urls), urls))
-    cluster_state = StableClusterState(nodes_urls=nodes_urls)
-    Node(node_id, NodeState(cluster_state.nodes_ids), cluster_state,
-         logger=to_logger(str(node_id)),
+              type=click.IntRange(0))
+def main(host: str, port: int) -> None:
+    Node(host=host,
+         port=port,
+         logger=to_logger(host),
          processors={'/log': process_log}).run()
 
 
@@ -66,10 +59,6 @@ def process_log(node: Node, parameters: Any) -> None:
     time.sleep(delay)
     node.logger.debug(f'{node.id} finished processing {parameters} '
                       f'after {delay}s')
-
-
-def url_to_node_id(url: URL) -> NodeId:
-    return url.authority
 
 
 if __name__ == '__main__':

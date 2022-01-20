@@ -14,7 +14,7 @@ from .hints import (NodeId,
 class StableClusterState:
     def __init__(self,
                  *,
-                 heartbeat: Time = 5,
+                 heartbeat: Time,
                  nodes_urls: Mapping[NodeId, URL]) -> None:
         self._heartbeat = heartbeat
         self._nodes_urls = nodes_urls

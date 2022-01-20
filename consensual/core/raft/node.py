@@ -1,5 +1,6 @@
 import asyncio
 import enum
+import json
 import logging.config
 import random
 from asyncio import get_event_loop
@@ -35,7 +36,10 @@ from .node_state import (NodeState,
                          update_state_nodes_ids,
                          update_state_term)
 from .record import Record
-from .utils import format_exception
+from .utils import (format_exception,
+                    host_to_ip_address,
+                    subtract_mapping,
+                    unite_mappings)
 
 START_CLUSTER_STATE_UPDATE_ACTION = '0'
 END_CLUSTER_STATE_UPDATE_ACTION = '1'
@@ -339,15 +343,21 @@ class Node:
                  '_reelection_task', '_state', '_sync_task')
 
     def __init__(self,
-                 id_: NodeId,
-                 state: NodeState,
-                 cluster_state: AnyClusterState,
                  *,
+                 host: str,
+                 port: int,
+                 heartbeat: Time = 5,
                  logger: Optional[logging.Logger] = None,
                  processors: Dict[str, Processor]) -> None:
-        self._id = id_
-        self._cluster_state = cluster_state
-        self._state = state
+        node_url = URL.build(scheme='http',
+                             host=host,
+                             port=port)
+        self._id = node_url_to_id(node_url)
+        self._cluster_state = StableClusterState(
+                heartbeat=heartbeat,
+                nodes_urls={self.id: node_url}
+        )
+        self._state = NodeState(self.cluster_state.nodes_ids)
         self._last_heartbeat_time = -self.cluster_state.heartbeat
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
@@ -404,7 +414,6 @@ class Node:
         return self._state
 
     def run(self) -> None:
-        self._start_reelection_timer()
         url = self.cluster_state.nodes_urls[self.id]
         web.run_app(self._app,
                     host=url.host,
@@ -431,36 +440,68 @@ class Node:
         return websocket
 
     async def _handle_delete(self, request: web.Request) -> web.Response:
-        self.logger.debug(f'{self.id} gets removed')
-        rest_nodes_urls = dict(self.cluster_state.nodes_urls)
-        del rest_nodes_urls[self.id]
-        call = UpdateCall(
-                StableClusterState(nodes_urls=rest_nodes_urls,
-                                   heartbeat=self.cluster_state.heartbeat))
-        reply = await self._process_update_call(call)
-        return web.json_response(reply.as_json())
+        text = await request.text()
+        if text:
+            raw_nodes_urls = json.loads(text)
+            assert isinstance(raw_nodes_urls, list)
+            nodes_urls = [URL(raw_url) for raw_url in raw_nodes_urls]
+            nodes_urls_to_delete = {node_url_to_id(node_url): node_url
+                                    for node_url in nodes_urls}
+            nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
+                                     - set(self.cluster_state.nodes_ids))
+            if nonexistent_nodes_ids:
+                raise web.HTTPBadRequest(
+                        reason
+                        =('nonexistent node(s) found: {nodes_ids}'
+                          .format(nodes_ids=', '.join(nonexistent_nodes_ids))))
+            self.logger.debug(
+                    ('{id} initializes removal of {nodes_ids}'
+                     .format(id=self.id,
+                             nodes_ids=', '.join(nodes_urls_to_delete))))
+            call = UpdateCall(StableClusterState(
+                    nodes_urls=subtract_mapping(self.cluster_state.nodes_urls,
+                                                nodes_urls_to_delete),
+                    heartbeat=self.cluster_state.heartbeat))
+            reply = await self._process_update_call(call)
+            return web.json_response(reply.as_json())
+        else:
+            self.logger.debug(f'{self.id} gets removed')
+            rest_nodes_urls = dict(self.cluster_state.nodes_urls)
+            del rest_nodes_urls[self.id]
+            call = UpdateCall(
+                    StableClusterState(nodes_urls=rest_nodes_urls,
+                                       heartbeat=self.cluster_state.heartbeat))
+            reply = await self._process_update_call(call)
+            return web.json_response(reply.as_json())
 
     async def _handle_post(self, request: web.Request) -> web.Response:
-        raw_nodes_urls_to_add = await request.json()
-        nodes_urls_to_add = {
-            node_id: URL(raw_node_url)
-            for node_id, raw_node_url in raw_nodes_urls_to_add.items()}
-        nodes_ids_to_add = nodes_urls_to_add.keys()
-        existing_nodes_ids = (nodes_ids_to_add
-                              & set(self.cluster_state.nodes_ids))
-        if existing_nodes_ids:
-            raise web.HTTPBadRequest(
-                    reason=('nodes {nodes_ids} already exist'
-                            .format(nodes_ids=', '.join(existing_nodes_ids))))
-        self.logger.debug('{id} adds {nodes_ids}'
-                          .format(id=self.id,
-                                  nodes_ids=', '.join(nodes_urls_to_add)))
-        call = UpdateCall(StableClusterState(
-                nodes_urls={**self.cluster_state.nodes_urls,
-                            **nodes_urls_to_add},
-                heartbeat=self.cluster_state.heartbeat))
-        reply = await self._process_update_call(call)
-        return web.json_response(reply.as_json())
+        text = await request.text()
+        if text:
+            raw_urls = json.loads(text)
+            assert isinstance(raw_urls, list)
+            urls = [URL(raw_url) for raw_url in raw_urls]
+            nodes_urls_to_add = {node_url_to_id(node_url): node_url
+                                 for node_url in urls}
+            existing_nodes_ids = (nodes_urls_to_add.keys()
+                                  & set(self.cluster_state.nodes_ids))
+            if existing_nodes_ids:
+                raise web.HTTPBadRequest(
+                        reason
+                        =('already existing node(s) found: {nodes_ids}'
+                          .format(nodes_ids=', '.join(existing_nodes_ids))))
+            self.logger.debug('{id} initializes adding of {nodes_ids}'
+                              .format(id=self.id,
+                                      nodes_ids=', '.join(nodes_urls_to_add)))
+            call = UpdateCall(StableClusterState(
+                    nodes_urls=unite_mappings(self.cluster_state.nodes_urls,
+                                              nodes_urls_to_add),
+                    heartbeat=self.cluster_state.heartbeat))
+            reply = await self._process_update_call(call)
+            return web.json_response(reply.as_json())
+        else:
+            self.logger.debug(f'{self.id} gets initialized')
+            self._start_reelection_timer()
+            return web.HTTPOk()
 
     async def _handle_record(self, request: web.Request) -> web.Response:
         parameters = await request.json()
@@ -849,3 +890,7 @@ class Node:
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)
         update_state_nodes_ids(self.state, cluster_state.nodes_ids)
+
+
+def node_url_to_id(url: URL) -> NodeId:
+    return f'{host_to_ip_address(url.host)}:{url.port}'
