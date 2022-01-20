@@ -214,8 +214,7 @@ class SyncReply:
 class UpdateCall:
     __slots__ = '_cluster_state',
 
-    def __new__(cls, cluster_state: StableClusterState
-                ) -> 'UpdateCall':
+    def __new__(cls, cluster_state: StableClusterState) -> 'UpdateCall':
         self = super().__new__(cls)
         self._cluster_state = cluster_state
         return self
