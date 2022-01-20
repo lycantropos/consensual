@@ -31,7 +31,7 @@ class Record:
 
     @classmethod
     def from_json(cls, *, command: Dict[str, Any], term: Term) -> 'Record':
-        return cls(command=Command(**command),
+        return cls(command=Command.from_json(**command),
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
