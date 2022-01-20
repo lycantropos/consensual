@@ -232,12 +232,24 @@ class UpdateCall:
         return {'configuration': self.configuration.as_json()}
 
 
-@dataclasses.dataclass(frozen=True)
 class UpdateReply:
-    error: Optional[str]
+    __slots__ = '_error',
+
+    def __new__(cls, error: Optional[str]) -> 'UpdateReply':
+        self = super().__new__(cls)
+        self._error = error
+        return self
+
+    __repr__ = generate_repr(__new__)
+
+    @property
+    def error(self) -> Optional[str]:
+        return self._error
+
+    from_json = classmethod(__new__)
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'error': self.error}
 
 
 class VoteCall:
@@ -541,7 +553,7 @@ class Node:
             except (ClientError, OSError) as exception:
                 return UpdateReply(error=format_exception(exception))
             else:
-                return UpdateReply(**raw_reply)
+                return UpdateReply.from_json(**raw_reply)
         transitional_configuration = TransitionalClusterConfiguration(
                 self.configuration, call.configuration)
         self.state.log.append(Record(
