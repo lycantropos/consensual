@@ -294,14 +294,40 @@ class VoteCall:
                 'term': self.term}
 
 
-@dataclasses.dataclass(frozen=True)
 class VoteReply:
-    node_id: NodeId
-    term: Term
-    supports: bool
+    __slots__ = '_node_id', '_supports', '_term'
+
+    def __new__(cls,
+                *,
+                node_id: NodeId,
+                supports: bool,
+                term: Term) -> 'VoteReply':
+        self = super().__new__(cls)
+        self._node_id = node_id
+        self._supports = supports
+        self._term = term
+        return self
+
+    __repr__ = generate_repr(__new__)
+
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
+    @property
+    def supports(self) -> bool:
+        return self._supports
+
+    @property
+    def term(self) -> Term:
+        return self._term
+
+    from_json = classmethod(__new__)
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'node_id': self.node_id,
+                'supports': self.supports,
+                'term': self.term}
 
 
 class Node:
@@ -472,7 +498,7 @@ class Node:
                              term=self.state.term,
                              supports=False)
         else:
-            return VoteReply(**raw_reply)
+            return VoteReply.from_json(**raw_reply)
 
     async def _process_log_call(self, call: LogCall) -> LogReply:
         self.logger.debug(f'{self.id} processes {call}')
