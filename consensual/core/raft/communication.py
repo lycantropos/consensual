@@ -4,6 +4,7 @@ from typing import (Any,
                     Collection,
                     Dict,
                     Generic,
+                    Mapping,
                     TypeVar)
 
 from aiohttp import (ClientError,
@@ -11,73 +12,85 @@ from aiohttp import (ClientError,
                      hdrs,
                      web_ws)
 from reprit.base import generate_repr
+from yarl import URL
 
-from .cluster_state import AnyClusterState
-from .hints import NodeId
+from .hints import Time
 from .utils import (Error,
                     Ok,
                     Result)
 
-_T = TypeVar('_T')
+_Receiver = TypeVar('_Receiver')
+_Path = TypeVar('_Path')
 
 
-class Communication(Generic[_T]):
+class Communication(Generic[_Receiver, _Path]):
     HTTP_METHOD = hdrs.METH_PATCH
     assert HTTP_METHOD is not hdrs.METH_POST
 
     def __init__(self,
-                 cluster_state: AnyClusterState,
-                 paths: Collection[_T]) -> None:
-        self.cluster_state = cluster_state
-        self._paths = paths
-        self._latencies: Dict[NodeId, deque] = {
-            node_id: deque([0],
-                           maxlen=10)
-            for node_id in self.cluster_state.nodes_ids}
+                 *,
+                 heartbeat: Time,
+                 paths: Collection[_Path],
+                 registry: Mapping[_Receiver, URL]) -> None:
+        self._heartbeat, self._paths, self.registry = (heartbeat, paths,
+                                                       registry)
+        self._latencies: Dict[URL, deque] = {
+            receiver: deque([0],
+                            maxlen=10)
+            for receiver in self.registry.keys()
+        }
         self._loop = asyncio.get_event_loop()
-        self._messages = {node_id: asyncio.Queue()
-                          for node_id in self.cluster_state.nodes_ids}
-        self._results = {node_id: {path: asyncio.Queue()
-                                   for path in self.paths}
-                         for node_id in self.cluster_state.nodes_ids}
+        self._messages = {receiver: asyncio.Queue()
+                          for receiver in self.registry.keys()}
+        self._results = {receiver: {path: asyncio.Queue()
+                                    for path in self.paths}
+                         for receiver in self.registry.keys()}
         self._session = ClientSession(loop=self._loop)
         self._channels = {
-            node_id: self._loop.create_task(self._channel(node_id))
-            for node_id in self.cluster_state.nodes_ids
+            receiver: self._loop.create_task(self._channel(receiver))
+            for receiver in self.registry.keys()
         }
 
     __repr__ = generate_repr(__init__)
 
     @property
-    def paths(self) -> Collection[_T]:
+    def heartbeat(self) -> Time:
+        return self._heartbeat
+
+    @property
+    def paths(self) -> Collection[_Path]:
         return self._paths
 
-    async def send(self, receiver: NodeId, path: _T, message: Any) -> Any:
+    async def send(self,
+                   receiver: _Receiver,
+                   path: _Path,
+                   message: Any) -> Any:
         assert path in self.paths
         self._messages[receiver].put_nowait((path, message))
         result: Result = await self._results[receiver][path].get()
         return result.value
 
-    def connect(self, node_id: NodeId) -> None:
-        self._latencies[node_id] = deque([0],
-                                         maxlen=10)
-        self._messages[node_id] = asyncio.Queue()
-        self._results[node_id] = {path: asyncio.Queue() for path in self.paths}
-        self._channels[node_id] = self._loop.create_task(
-                self._channel(node_id)
+    def connect(self, receiver: _Receiver) -> None:
+        self._latencies[receiver] = deque([0],
+                                          maxlen=10)
+        self._messages[receiver] = asyncio.Queue()
+        self._results[receiver] = {path: asyncio.Queue()
+                                   for path in self.paths}
+        self._channels[receiver] = self._loop.create_task(
+                self._channel(receiver)
         )
 
-    def disconnect(self, node_id: NodeId) -> None:
-        self._channels.pop(node_id).cancel()
-        del (self._messages[node_id],
-             self._latencies[node_id],
-             self._results[node_id])
+    def disconnect(self, url: URL) -> None:
+        self._channels.pop(url).cancel()
+        del (self._messages[url],
+             self._latencies[url],
+             self._results[url])
 
     def to_expected_broadcast_time(self) -> float:
         return sum(max(latencies) for latencies in self._latencies.values())
 
-    async def _channel(self, receiver: NodeId) -> None:
-        receiver_url = self.cluster_state.nodes_urls[receiver]
+    async def _channel(self, receiver: _Receiver) -> None:
+        receiver_url = self.registry[receiver]
         messages, results, latencies = (self._messages[receiver],
                                         self._results[receiver],
                                         self._latencies[receiver])
@@ -88,8 +101,8 @@ class Communication(Generic[_T]):
                 async with self._session.ws_connect(
                         receiver_url,
                         method=self.HTTP_METHOD,
-                        timeout=self.cluster_state.heartbeat,
-                        heartbeat=self.cluster_state.heartbeat) as connection:
+                        timeout=self.heartbeat,
+                        heartbeat=self.heartbeat) as connection:
                     message_start = to_time()
                     await connection.send_json({'path': path,
                                                 'message': message})
@@ -108,13 +121,12 @@ class Communication(Generic[_T]):
                 path, message = await messages.get()
 
 
-def update_communication_cluster_state(communication: Communication,
-                                       cluster_state: AnyClusterState
-                                       ) -> None:
-    new_nodes_ids, old_nodes_ids = (set(cluster_state.nodes_ids),
-                                    set(communication.cluster_state.nodes_ids))
-    for removed_node_id in old_nodes_ids - new_nodes_ids:
-        communication.disconnect(removed_node_id)
-    for added_node_id in new_nodes_ids - old_nodes_ids:
-        communication.connect(added_node_id)
-    communication.cluster_state = cluster_state
+def update_communication_registry(communication: Communication,
+                                  registry: Mapping[_Receiver, URL]) -> None:
+    new_receivers, old_receivers = (registry.keys(),
+                                    communication.registry.keys())
+    for removed_receiver in old_receivers - new_receivers:
+        communication.disconnect(removed_receiver)
+    communication.registry = registry
+    for added_receiver in new_receivers - old_receivers:
+        communication.connect(added_receiver)

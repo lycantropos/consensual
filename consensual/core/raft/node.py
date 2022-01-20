@@ -23,7 +23,7 @@ from .cluster_state import (AnyClusterState,
                             TransitionalClusterState)
 from .command import Command
 from .communication import (Communication,
-                            update_communication_cluster_state)
+                            update_communication_registry)
 from .hints import (NodeId,
                     Processor,
                     Protocol,
@@ -353,8 +353,10 @@ class Node:
         self._loop = get_event_loop()
         self._app = web.Application()
         self._commands_executor = ThreadPoolExecutor(max_workers=1)
-        self._communication: Communication[CallPath] = Communication(
-                self.cluster_state, list(CallPath))
+        self._communication: Communication[NodeId, CallPath] = Communication(
+                heartbeat=self.cluster_state.heartbeat,
+                paths=list(CallPath),
+                registry=self.cluster_state.nodes_urls)
         self._election_duration = 0
         self._election_task = self._loop.create_future()
         self._reelection_lag = 0
@@ -839,5 +841,6 @@ class Node:
                           f'from {sorted(self.cluster_state.nodes_ids)}\n'
                           f'to {sorted(cluster_state.nodes_ids)}')
         self._cluster_state = cluster_state
-        update_communication_cluster_state(self._communication, cluster_state)
+        update_communication_registry(self._communication,
+                                      cluster_state.nodes_urls)
         update_state_nodes_ids(self.state, cluster_state.nodes_ids)
