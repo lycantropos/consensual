@@ -60,10 +60,12 @@ class CallPath(enum.IntEnum):
 class LogCall:
     __slots__ = '_command',
 
-    def __init__(self, command: Command) -> None:
+    def __new__(cls, command: Command) -> 'LogCall':
+        self = super().__new__(cls)
         self._command = command
+        return self
 
-    __repr__ = generate_repr(__init__)
+    __repr__ = generate_repr(__new__)
 
     @property
     def command(self) -> Command:
