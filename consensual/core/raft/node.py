@@ -103,28 +103,30 @@ class SyncCall:
     __slots__ = ('_commit_length', '_node_id', '_prefix_length',
                  '_prefix_term', '_suffix', '_term')
 
-    def __init__(self,
-                 *,
-                 commit_length: int,
-                 node_id: NodeId,
-                 prefix_length: int,
-                 prefix_term: Term,
-                 suffix: List[Record],
-                 term: Term) -> None:
+    def __new__(cls,
+                *,
+                commit_length: int,
+                node_id: NodeId,
+                prefix_length: int,
+                prefix_term: Term,
+                suffix: List[Record],
+                term: Term) -> 'SyncCall':
+        self = super().__new__(cls)
         (
             self._commit_length, self._node_id, self._prefix_length,
             self._prefix_term, self._suffix, self._term
         ) = commit_length, node_id, prefix_length, prefix_term, suffix, term
+        return self
 
-    __repr__ = generate_repr(__init__)
+    __repr__ = generate_repr(__new__)
+
+    @property
+    def commit_length(self) -> int:
+        return self._commit_length
 
     @property
     def node_id(self) -> NodeId:
         return self._node_id
-
-    @property
-    def term(self) -> Term:
-        return self._term
 
     @property
     def prefix_length(self) -> int:
@@ -135,12 +137,12 @@ class SyncCall:
         return self._prefix_term
 
     @property
-    def commit_length(self) -> int:
-        return self._commit_length
-
-    @property
     def suffix(self) -> List[Record]:
         return self._suffix
+
+    @property
+    def term(self) -> Term:
+        return self._term
 
     @classmethod
     def from_json(cls,
@@ -155,8 +157,7 @@ class SyncCall:
                    node_id=node_id,
                    prefix_length=prefix_length,
                    prefix_term=prefix_term,
-                   suffix=[Record.from_json(**raw_record)
-                           for raw_record in suffix],
+                   suffix=[Record.from_json(**record) for record in suffix],
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
@@ -164,7 +165,7 @@ class SyncCall:
                 'node_id': self.node_id,
                 'prefix_length': self.prefix_length,
                 'prefix_term': self.prefix_term,
-                'suffix': self.suffix,
+                'suffix': [record.as_json() for record in self.suffix],
                 'term': self.term}
 
 
