@@ -209,16 +209,27 @@ class SyncReply:
                 'term': self.term}
 
 
-@dataclasses.dataclass(frozen=True)
 class UpdateCall:
-    configuration: StableClusterConfiguration
+    __slots__ = '_configuration',
 
-    def as_json(self) -> Dict[str, Any]:
-        return {'configuration': self.configuration.as_json()}
+    def __new__(cls, configuration: StableClusterConfiguration
+                ) -> 'UpdateCall':
+        self = super().__new__(cls)
+        self._configuration = configuration
+        return self
+
+    __repr__ = generate_repr(__new__)
+
+    @property
+    def configuration(self) -> StableClusterConfiguration:
+        return self._configuration
 
     @classmethod
     def from_json(cls, configuration: Dict[str, Any]) -> 'UpdateCall':
         return cls(StableClusterConfiguration.from_json(**configuration))
+
+    def as_json(self) -> Dict[str, Any]:
+        return {'configuration': self.configuration.as_json()}
 
 
 @dataclasses.dataclass(frozen=True)
