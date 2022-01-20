@@ -529,10 +529,10 @@ class Node:
         self._restart_reelection_timer()
         if call.term > self.state.term:
             update_state_term(self.state, call.term)
-            self._cancel_election_timer()
-        if call.term == self.state.term and call.node_id != self.id:
-            self.state.leader_node_id = call.node_id
-            self.state.role = Role.FOLLOWER
+            self._follow(call.node_id)
+        elif (call.term == self.state.term
+              and self.state.leader_node_id is None):
+            self._follow(call.node_id)
         if (call.term == self.state.term
                 and (len(self.state.log) >= call.prefix_length
                      and (call.prefix_length == 0
@@ -755,6 +755,11 @@ class Node:
             self._cancel_election_timer()
             self._cancel_reelection_timer()
             self._cancel_sync_timer()
+
+    def _follow(self, leader_node_id: NodeId) -> None:
+        self.state.leader_node_id = leader_node_id
+        self.state.role = Role.FOLLOWER
+        self._cancel_election_timer()
 
     def _lead(self) -> None:
         self.logger.info(f'{self.id} is leader of term {self.state.term}')
