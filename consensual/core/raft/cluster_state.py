@@ -11,7 +11,7 @@ from .hints import (NodeId,
                     Time)
 
 
-class StableClusterConfiguration:
+class StableClusterState:
     def __init__(self,
                  *,
                  nodes_urls: Mapping[NodeId, URL],
@@ -24,7 +24,7 @@ class StableClusterConfiguration:
     def __eq__(self, other: Any) -> Any:
         return ((self.heartbeat == other.heartbeat
                  and self.nodes_urls == other.nodes_urls)
-                if isinstance(other, StableClusterConfiguration)
+                if isinstance(other, StableClusterState)
                 else NotImplemented)
 
     @property
@@ -42,7 +42,7 @@ class StableClusterConfiguration:
     @classmethod
     def from_json(cls,
                   nodes_urls: Dict[NodeId, str],
-                  **kwargs: Any) -> 'StableClusterConfiguration':
+                  **kwargs: Any) -> 'StableClusterState':
         return cls(
                 nodes_urls={node_id: URL(raw_node_url)
                             for node_id, raw_node_url in nodes_urls.items()},
@@ -60,17 +60,18 @@ class StableClusterConfiguration:
         return len(nodes_ids) >= ceil_division(len(self.nodes_ids) + 1, 2)
 
 
-class TransitionalClusterConfiguration:
+class TransitionalClusterState:
     def __init__(self,
-                 old: StableClusterConfiguration,
-                 new: StableClusterConfiguration) -> None:
+                 *,
+                 old: StableClusterState,
+                 new: StableClusterState) -> None:
         self._new, self._old = new, old
 
     __repr__ = generate_repr(__init__)
 
     def __eq__(self, other: Any) -> Any:
         return (self.old == other.old and self.new == other.new
-                if isinstance(other, TransitionalClusterConfiguration)
+                if isinstance(other, TransitionalClusterState)
                 else NotImplemented)
 
     @property
@@ -78,7 +79,7 @@ class TransitionalClusterConfiguration:
         return self.new.heartbeat
 
     @property
-    def new(self) -> StableClusterConfiguration:
+    def new(self) -> StableClusterState:
         return self._new
 
     @property
@@ -90,16 +91,16 @@ class TransitionalClusterConfiguration:
         return {**self.old.nodes_urls, **self.new.nodes_urls}
 
     @property
-    def old(self) -> StableClusterConfiguration:
+    def old(self) -> StableClusterState:
         return self._old
 
     @classmethod
     def from_json(cls,
                   *,
                   old: Dict[str, Any],
-                  new: Dict[str, Any]) -> 'TransitionalClusterConfiguration':
-        return cls(old=StableClusterConfiguration.from_json(**old),
-                   new=StableClusterConfiguration.from_json(**new))
+                  new: Dict[str, Any]) -> 'TransitionalClusterState':
+        return cls(old=StableClusterState.from_json(**old),
+                   new=StableClusterState.from_json(**new))
 
     def as_json(self) -> Dict[str, Any]:
         return {'old': self.old.as_json(), 'new': self.new.as_json()}
@@ -109,8 +110,7 @@ class TransitionalClusterConfiguration:
                 and self.new.has_majority(nodes_ids))
 
 
-AnyClusterConfiguration = Union[StableClusterConfiguration,
-                                TransitionalClusterConfiguration]
+AnyClusterState = Union[StableClusterState, TransitionalClusterState]
 
 
 def ceil_division(dividend: int, divisor: int) -> int:

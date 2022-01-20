@@ -1,5 +1,5 @@
-from .cluster_configuration import (StableClusterConfiguration,
-                                    TransitionalClusterConfiguration)
+from .cluster_state import (StableClusterState,
+                            TransitionalClusterState)
 from .command import Command
 from .hints import (NodeId,
                     Processor,

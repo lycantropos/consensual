@@ -18,12 +18,12 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-from .cluster_configuration import (AnyClusterConfiguration,
-                                    StableClusterConfiguration,
-                                    TransitionalClusterConfiguration)
+from .cluster_state import (AnyClusterState,
+                            StableClusterState,
+                            TransitionalClusterState)
 from .command import Command
 from .communication import (Communication,
-                            update_communication_configuration)
+                            update_communication_cluster_state)
 from .hints import (NodeId,
                     Processor,
                     Protocol,
@@ -37,12 +37,12 @@ from .node_state import (NodeState,
 from .record import Record
 from .utils import format_exception
 
-START_CONFIGURATION_UPDATE_ACTION = '0'
-END_CONFIGURATION_UPDATE_ACTION = '1'
-assert (START_CONFIGURATION_UPDATE_ACTION
-        and not START_CONFIGURATION_UPDATE_ACTION.startswith('/'))
-assert (END_CONFIGURATION_UPDATE_ACTION
-        and not END_CONFIGURATION_UPDATE_ACTION.startswith('/'))
+START_CLUSTER_STATE_UPDATE_ACTION = '0'
+END_CLUSTER_STATE_UPDATE_ACTION = '1'
+assert (START_CLUSTER_STATE_UPDATE_ACTION
+        and not START_CLUSTER_STATE_UPDATE_ACTION.startswith('/'))
+assert (END_CLUSTER_STATE_UPDATE_ACTION
+        and not END_CLUSTER_STATE_UPDATE_ACTION.startswith('/'))
 
 
 class Call(Protocol):
@@ -212,26 +212,26 @@ class SyncReply:
 
 
 class UpdateCall:
-    __slots__ = '_configuration',
+    __slots__ = '_cluster_state',
 
-    def __new__(cls, configuration: StableClusterConfiguration
+    def __new__(cls, cluster_state: StableClusterState
                 ) -> 'UpdateCall':
         self = super().__new__(cls)
-        self._configuration = configuration
+        self._cluster_state = cluster_state
         return self
 
     __repr__ = generate_repr(__new__)
 
     @property
-    def configuration(self) -> StableClusterConfiguration:
-        return self._configuration
+    def cluster_state(self) -> StableClusterState:
+        return self._cluster_state
 
     @classmethod
-    def from_json(cls, configuration: Dict[str, Any]) -> 'UpdateCall':
-        return cls(StableClusterConfiguration.from_json(**configuration))
+    def from_json(cls, cluster_state: Dict[str, Any]) -> 'UpdateCall':
+        return cls(StableClusterState.from_json(**cluster_state))
 
     def as_json(self) -> Dict[str, Any]:
-        return {'configuration': self.configuration.as_json()}
+        return {'cluster_state': self.cluster_state.as_json()}
 
 
 class UpdateReply:
@@ -334,7 +334,7 @@ class VoteReply:
 
 class Node:
     __slots__ = ('_app', '_commands_executor', '_communication',
-                 '_configuration', '_election_duration', '_election_task',
+                 '_cluster_state', '_election_duration', '_election_task',
                  '_id', '_last_heartbeat_time', '_logger', '_loop',
                  '_patch_routes', '_processors', '_reelection_lag',
                  '_reelection_task', '_state', '_sync_task')
@@ -342,20 +342,20 @@ class Node:
     def __init__(self,
                  id_: NodeId,
                  state: NodeState,
-                 configuration: AnyClusterConfiguration,
+                 cluster_state: AnyClusterState,
                  *,
                  logger: Optional[logging.Logger] = None,
                  processors: Dict[str, Processor]) -> None:
         self._id = id_
-        self._configuration = configuration
+        self._cluster_state = cluster_state
         self._state = state
-        self._last_heartbeat_time = -self.configuration.heartbeat
+        self._last_heartbeat_time = -self.cluster_state.heartbeat
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = get_event_loop()
         self._app = web.Application()
         self._commands_executor = ThreadPoolExecutor(max_workers=1)
         self._communication: Communication[CallPath] = Communication(
-                self.configuration, list(CallPath))
+                self.cluster_state, list(CallPath))
         self._election_duration = 0
         self._election_task = self._loop.create_future()
         self._reelection_lag = 0
@@ -374,17 +374,17 @@ class Node:
         self._processors = processors
         for path in self.processors.keys():
             self._app.router.add_post(path, self._handle_record)
-        self._processors[START_CONFIGURATION_UPDATE_ACTION] = (
-            Node._start_configuration_update)
-        self._processors[END_CONFIGURATION_UPDATE_ACTION] = (
-            Node._end_configuration_update)
+        self._processors[START_CLUSTER_STATE_UPDATE_ACTION] = (
+            Node._start_cluster_state_update)
+        self._processors[END_CLUSTER_STATE_UPDATE_ACTION] = (
+            Node._end_cluster_state_update)
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
 
     @property
-    def configuration(self) -> AnyClusterConfiguration:
-        return self._configuration
+    def cluster_state(self) -> AnyClusterState:
+        return self._cluster_state
 
     @property
     def id(self) -> NodeId:
@@ -404,7 +404,7 @@ class Node:
 
     def run(self) -> None:
         self._start_reelection_timer()
-        url = self.configuration.nodes_urls[self.id]
+        url = self.cluster_state.nodes_urls[self.id]
         web.run_app(self._app,
                     host=url.host,
                     port=url.port,
@@ -431,11 +431,11 @@ class Node:
 
     async def _handle_delete(self, request: web.Request) -> web.Response:
         self.logger.debug(f'{self.id} gets removed')
-        rest_nodes_urls = dict(self.configuration.nodes_urls)
+        rest_nodes_urls = dict(self.cluster_state.nodes_urls)
         del rest_nodes_urls[self.id]
         call = UpdateCall(
-                StableClusterConfiguration(nodes_urls=rest_nodes_urls,
-                                           heartbeat=self.configuration.heartbeat))
+                StableClusterState(nodes_urls=rest_nodes_urls,
+                                   heartbeat=self.cluster_state.heartbeat))
         reply = await self._process_update_call(call)
         return web.json_response(reply.as_json())
 
@@ -446,7 +446,7 @@ class Node:
             for node_id, raw_node_url in raw_nodes_urls_to_add.items()}
         nodes_ids_to_add = nodes_urls_to_add.keys()
         existing_nodes_ids = (nodes_ids_to_add
-                              & set(self.configuration.nodes_ids))
+                              & set(self.cluster_state.nodes_ids))
         if existing_nodes_ids:
             raise web.HTTPBadRequest(
                     reason=('nodes {nodes_ids} already exist'
@@ -454,10 +454,10 @@ class Node:
         self.logger.debug('{id} adds {nodes_ids}'
                           .format(id=self.id,
                                   nodes_ids=', '.join(nodes_urls_to_add)))
-        call = UpdateCall(StableClusterConfiguration(
-                nodes_urls={**self.configuration.nodes_urls,
+        call = UpdateCall(StableClusterState(
+                nodes_urls={**self.cluster_state.nodes_urls,
                             **nodes_urls_to_add},
-                heartbeat=self.configuration.heartbeat))
+                heartbeat=self.cluster_state.heartbeat))
         reply = await self._process_update_call(call)
         return web.json_response(reply.as_json())
 
@@ -583,27 +583,27 @@ class Node:
                 return UpdateReply(error=format_exception(exception))
             else:
                 return UpdateReply.from_json(**raw_reply)
-        transitional_configuration = TransitionalClusterConfiguration(
-                self.configuration, call.configuration)
+        next_cluster_state = TransitionalClusterState(old=self.cluster_state,
+                                                      new=call.cluster_state)
         self.state.log.append(Record(
-                command=Command(action=START_CONFIGURATION_UPDATE_ACTION,
-                                parameters=transitional_configuration.as_json()),
+                command=Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
+                                parameters=next_cluster_state.as_json()),
                 term=self.state.term))
-        self._update_configuration(transitional_configuration)
+        self._update_cluster_state(next_cluster_state)
         await self._sync_followers_once()
         return UpdateReply(error=None)
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self.id} processes {call}')
-        if call.node_id not in self.configuration.nodes_ids:
+        if call.node_id not in self.cluster_state.nodes_ids:
             self.logger.debug(f'{self.id} skips voting for {call.node_id} '
-                              f'because it is not in configuration')
+                              f'because it is not in cluster state')
             return VoteReply(node_id=self.id,
                              term=self.state.term,
                              supports=False)
         elif (self.state.leader_node_id is not None
               and (self._to_time() - self._last_heartbeat_time
-                   < self.configuration.heartbeat)):
+                   < self.cluster_state.heartbeat)):
             self.logger.debug(f'{self.id} skips voting for {call.node_id} '
                               f'because leader {self.state.leader_node_id} '
                               f'can be alive')
@@ -633,7 +633,7 @@ class Node:
                 and reply.term == self.state.term
                 and reply.supports):
             self.state.supporters_nodes_ids.add(reply.node_id)
-            if self.configuration.has_majority(
+            if self.cluster_state.has_majority(
                     self.state.supporters_nodes_ids):
                 self._lead()
         elif reply.term > self.state.term:
@@ -652,7 +652,7 @@ class Node:
             await asyncio.wait_for(
                     asyncio.gather(*[self._agitate_voter(node_id)
                                      for node_id
-                                     in self.configuration.nodes_ids]),
+                                     in self.cluster_state.nodes_ids]),
                     self._election_duration)
         finally:
             duration = self._to_time() - start
@@ -683,12 +683,12 @@ class Node:
             duration = self._to_time() - start
             self.logger.debug(f'{self.id} followers\' sync took {duration}s')
             await asyncio.sleep(
-                    self.configuration.heartbeat - duration
+                    self.cluster_state.heartbeat - duration
                     - self._communication.to_expected_broadcast_time())
 
     async def _sync_followers_once(self) -> None:
         await asyncio.gather(*[self._sync_follower(node_id)
-                               for node_id in self.configuration.nodes_ids])
+                               for node_id in self.cluster_state.nodes_ids])
 
     def _append_records(self,
                         prefix_length: int,
@@ -702,15 +702,15 @@ class Node:
             new_records = suffix[len(log) - prefix_length:]
             for record in reversed(new_records):
                 command = record.command
-                if command.action == START_CONFIGURATION_UPDATE_ACTION:
-                    configuration = TransitionalClusterConfiguration.from_json(
+                if command.action == START_CLUSTER_STATE_UPDATE_ACTION:
+                    cluster_state = TransitionalClusterState.from_json(
                             **command.parameters)
-                    self._update_configuration(configuration)
+                    self._update_cluster_state(cluster_state)
                     break
-                elif command.action == END_CONFIGURATION_UPDATE_ACTION:
-                    configuration = StableClusterConfiguration.from_json(
+                elif command.action == END_CLUSTER_STATE_UPDATE_ACTION:
+                    cluster_state = StableClusterState.from_json(
                             **command.parameters)
-                    self._update_configuration(configuration)
+                    self._update_cluster_state(cluster_state)
                     break
             log.extend(new_records)
 
@@ -744,12 +744,12 @@ class Node:
         else:
             raise exception
 
-    def _end_configuration_update(self, parameters: Dict[str, Any]) -> None:
-        self.logger.debug(f'{self.id} ends configuration update')
-        assert isinstance(self.configuration, StableClusterConfiguration)
-        assert (self.configuration == StableClusterConfiguration.from_json(
+    def _end_cluster_state_update(self, parameters: Dict[str, Any]) -> None:
+        self.logger.debug(f'{self.id} ends cluster state update')
+        assert isinstance(self.cluster_state, StableClusterState)
+        assert (self.cluster_state == StableClusterState.from_json(
                 **parameters))
-        if self.id not in self.configuration.nodes_ids:
+        if self.id not in self.cluster_state.nodes_ids:
             self.state.role = Role.FOLLOWER
             self._cancel_election_timer()
             self._cancel_reelection_timer()
@@ -759,7 +759,7 @@ class Node:
         self.logger.info(f'{self.id} is leader of term {self.state.term}')
         self.state.leader_node_id = self.id
         self.state.role = Role.LEADER
-        for node_id in self.configuration.nodes_ids:
+        for node_id in self.cluster_state.nodes_ids:
             self.state.sent_lengths[node_id] = len(self.state.log)
             self.state.accepted_lengths[node_id] = 0
         self._cancel_election_timer()
@@ -788,18 +788,17 @@ class Node:
         self._cancel_sync_timer()
         self._start_sync_timer()
 
-    def _start_configuration_update(self, parameters: Dict[str, Any]) -> None:
-        self.logger.debug(f'{self.id} starts configuration update')
-        assert isinstance(self.configuration, TransitionalClusterConfiguration)
+    def _start_cluster_state_update(self, parameters: Dict[str, Any]) -> None:
+        self.logger.debug(f'{self.id} starts cluster state update')
+        assert isinstance(self.cluster_state, TransitionalClusterState)
         if self.state.role is Role.LEADER:
-            configuration = TransitionalClusterConfiguration.from_json(
-                    **parameters)
-            assert configuration == self.configuration
+            cluster_state = TransitionalClusterState.from_json(**parameters)
+            assert cluster_state == self.cluster_state
             self.state.log.append(Record(
-                    command=Command(action=END_CONFIGURATION_UPDATE_ACTION,
-                                    parameters=configuration.new.as_json()),
+                    command=Command(action=END_CLUSTER_STATE_UPDATE_ACTION,
+                                    parameters=cluster_state.new.as_json()),
                     term=self.state.term))
-            self._update_configuration(configuration.new)
+            self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
 
     def _start_election_timer(self) -> None:
@@ -817,7 +816,7 @@ class Node:
 
     def _to_new_duration(self) -> Time:
         broadcast_time = self._communication.to_expected_broadcast_time()
-        heartbeat = self.configuration.heartbeat
+        heartbeat = self.cluster_state.heartbeat
         assert (
                 broadcast_time < heartbeat
         ), (
@@ -831,15 +830,15 @@ class Node:
     def _try_commit(self) -> None:
         state = self.state
         while (state.commit_length < len(state.log)
-               and self.configuration.has_majority(
+               and self.cluster_state.has_majority(
                         state_to_nodes_ids_that_accepted_more_records(state))):
             self._commit([state.log[state.commit_length]])
 
-    def _update_configuration(self,
-                              configuration: AnyClusterConfiguration) -> None:
-        self.logger.debug(f'{self.id} changes configuration\n'
-                          f'from {sorted(self.configuration.nodes_ids)}\n'
-                          f'to {sorted(configuration.nodes_ids)}')
-        self._configuration = configuration
-        update_communication_configuration(self._communication, configuration)
-        update_state_nodes_ids(self.state, configuration.nodes_ids)
+    def _update_cluster_state(self,
+                              cluster_state: AnyClusterState) -> None:
+        self.logger.debug(f'{self.id} changes cluster state\n'
+                          f'from {sorted(self.cluster_state.nodes_ids)}\n'
+                          f'to {sorted(cluster_state.nodes_ids)}')
+        self._cluster_state = cluster_state
+        update_communication_cluster_state(self._communication, cluster_state)
+        update_state_nodes_ids(self.state, cluster_state.nodes_ids)

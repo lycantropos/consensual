@@ -12,7 +12,7 @@ from aiohttp import (ClientError,
                      web_ws)
 from reprit.base import generate_repr
 
-from .cluster_configuration import AnyClusterConfiguration
+from .cluster_state import AnyClusterState
 from .hints import NodeId
 from .utils import (Error,
                     Ok,
@@ -26,24 +26,24 @@ class Communication(Generic[_T]):
     assert HTTP_METHOD is not hdrs.METH_POST
 
     def __init__(self,
-                 configuration: AnyClusterConfiguration,
+                 cluster_state: AnyClusterState,
                  paths: Collection[_T]) -> None:
-        self.configuration = configuration
+        self.cluster_state = cluster_state
         self._paths = paths
         self._latencies: Dict[NodeId, deque] = {
             node_id: deque([0],
                            maxlen=10)
-            for node_id in self.configuration.nodes_ids}
+            for node_id in self.cluster_state.nodes_ids}
         self._loop = asyncio.get_event_loop()
         self._messages = {node_id: asyncio.Queue()
-                          for node_id in self.configuration.nodes_ids}
+                          for node_id in self.cluster_state.nodes_ids}
         self._results = {node_id: {path: asyncio.Queue()
                                    for path in self.paths}
-                         for node_id in self.configuration.nodes_ids}
+                         for node_id in self.cluster_state.nodes_ids}
         self._session = ClientSession(loop=self._loop)
         self._channels = {
             node_id: self._loop.create_task(self._channel(node_id))
-            for node_id in self.configuration.nodes_ids
+            for node_id in self.cluster_state.nodes_ids
         }
 
     __repr__ = generate_repr(__init__)
@@ -77,7 +77,7 @@ class Communication(Generic[_T]):
         return sum(max(latencies) for latencies in self._latencies.values())
 
     async def _channel(self, receiver: NodeId) -> None:
-        receiver_url = self.configuration.nodes_urls[receiver]
+        receiver_url = self.cluster_state.nodes_urls[receiver]
         messages, results, latencies = (self._messages[receiver],
                                         self._results[receiver],
                                         self._latencies[receiver])
@@ -88,8 +88,8 @@ class Communication(Generic[_T]):
                 async with self._session.ws_connect(
                         receiver_url,
                         method=self.HTTP_METHOD,
-                        timeout=self.configuration.heartbeat,
-                        heartbeat=self.configuration.heartbeat) as connection:
+                        timeout=self.cluster_state.heartbeat,
+                        heartbeat=self.cluster_state.heartbeat) as connection:
                     message_start = to_time()
                     await connection.send_json({'path': path,
                                                 'message': message})
@@ -108,13 +108,13 @@ class Communication(Generic[_T]):
                 path, message = await messages.get()
 
 
-def update_communication_configuration(communication: Communication,
-                                       configuration: AnyClusterConfiguration
+def update_communication_cluster_state(communication: Communication,
+                                       cluster_state: AnyClusterState
                                        ) -> None:
-    new_nodes_ids, old_nodes_ids = (set(configuration.nodes_ids),
-                                    set(communication.configuration.nodes_ids))
+    new_nodes_ids, old_nodes_ids = (set(cluster_state.nodes_ids),
+                                    set(communication.cluster_state.nodes_ids))
     for removed_node_id in old_nodes_ids - new_nodes_ids:
         communication.disconnect(removed_node_id)
     for added_node_id in new_nodes_ids - old_nodes_ids:
         communication.connect(added_node_id)
-    communication.configuration = configuration
+    communication.cluster_state = cluster_state

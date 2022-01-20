@@ -4,9 +4,9 @@ from .core.raft import (Command,
                         NodeState,
                         Processor,
                         Record,
-                        StableClusterConfiguration,
+                        StableClusterState,
                         Term,
-                        TransitionalClusterConfiguration)
+                        TransitionalClusterState)
 
 Command = Command
 Node = Node
@@ -14,6 +14,6 @@ NodeId = NodeId
 NodeState = NodeState
 Record = Record
 Processor = Processor
-StableClusterConfiguration = StableClusterConfiguration
+StableClusterState = StableClusterState
 Term = Term
-TransitionalClusterConfiguration = TransitionalClusterConfiguration
+TransitionalClusterState = TransitionalClusterState
