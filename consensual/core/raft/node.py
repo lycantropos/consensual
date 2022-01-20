@@ -1,5 +1,4 @@
 import asyncio
-import dataclasses
 import enum
 import logging.config
 import random
