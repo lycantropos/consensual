@@ -332,8 +332,8 @@ class VoteReply:
 
 
 class Node:
-    __slots__ = ('_app', '_commands_executor', '_communication',
-                 '_cluster_state', '_election_duration', '_election_task',
+    __slots__ = ('_app', '_cluster_state', '_commands_executor',
+                 '_communication', '_election_duration', '_election_task',
                  '_id', '_last_heartbeat_time', '_logger', '_loop',
                  '_patch_routes', '_processors', '_reelection_lag',
                  '_reelection_task', '_state', '_sync_task')
