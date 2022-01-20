@@ -229,15 +229,46 @@ class UpdateReply:
         return dataclasses.asdict(self)
 
 
-@dataclasses.dataclass(frozen=True)
 class VoteCall:
-    node_id: NodeId
-    term: Term
-    log_length: int
-    log_term: Term
+    __slots__ = '_log_length', '_log_term', '_node_id', '_term'
+
+    def __new__(cls,
+                *,
+                log_length: int,
+                log_term: Term,
+                node_id: NodeId,
+                term: Term) -> 'VoteCall':
+        self = super().__new__(cls)
+        self._log_length, self._log_term, self._node_id, self._term = (
+            log_length, log_term, node_id, term
+        )
+        return self
+
+    __repr__ = generate_repr(__new__)
+
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
+    @property
+    def term(self) -> Term:
+        return self._term
+
+    @property
+    def log_length(self) -> int:
+        return self._log_length
+
+    @property
+    def log_term(self) -> Term:
+        return self._log_term
+
+    from_json = classmethod(__new__)
 
     def as_json(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {'log_length': self.log_length,
+                'log_term': self.log_term,
+                'node_id': self.node_id,
+                'term': self.term}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -283,7 +314,7 @@ class Node:
             CallPath.LOG: (LogCall.from_json, self._process_log_call),
             CallPath.SYNC: (SyncCall.from_json, self._process_sync_call),
             CallPath.UPDATE: (UpdateCall.from_json, self._process_update_call),
-            CallPath.VOTE: (VoteCall, self._process_vote_call),
+            CallPath.VOTE: (VoteCall.from_json, self._process_vote_call),
         }
         self._app.router.add_delete('/', self._handle_delete)
         self._app.router.add_post('/', self._handle_post)
@@ -341,8 +372,8 @@ class Node:
             message: web_ws.WSMessage
             raw_call = message.json()
             call_path = CallPath(raw_call['path'])
-            call_cls, processor = routes[call_path]
-            call = call_cls(**raw_call['message'])
+            call_from_json, processor = routes[call_path]
+            call = call_from_json(**raw_call['message'])
             reply = await processor(call)
             await websocket.send_json(reply.as_json())
         return websocket
