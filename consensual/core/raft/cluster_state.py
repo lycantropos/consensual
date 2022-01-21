@@ -12,6 +12,8 @@ from .hints import (NodeId,
 
 
 class StableClusterState:
+    stable = True
+
     def __init__(self,
                  *,
                  heartbeat: Time,
@@ -62,6 +64,8 @@ class StableClusterState:
 
 
 class TransitionalClusterState:
+    stable = False
+
     def __init__(self,
                  *,
                  old: StableClusterState,
