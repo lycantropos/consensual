@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 import click
+from yarl import URL
 
 from .raft import Node
 
@@ -47,17 +48,19 @@ def to_logger(name: str,
               required=True,
               type=click.IntRange(0))
 def main(host: str, port: int) -> None:
-    Node(host=host,
-         port=port,
-         logger=to_logger(host),
-         processors={'/log': process_log}).run()
+    node_url = URL.build(scheme='http',
+                         host=host,
+                         port=port)
+    Node.from_url(node_url,
+                  logger=to_logger(node_url.authority),
+                  processors={'/log': process_log}).run()
 
 
 def process_log(node: Node, parameters: Any) -> None:
-    node.logger.debug(f'{node.id} processes {parameters}')
+    node.logger.debug(f'{node.url} processes {parameters}')
     delay = random.uniform(0, 10)
     time.sleep(delay)
-    node.logger.debug(f'{node.id} finished processing {parameters} '
+    node.logger.debug(f'{node.url} finished processing {parameters} '
                       f'after {delay}s')
 
 

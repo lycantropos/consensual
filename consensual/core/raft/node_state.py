@@ -20,12 +20,14 @@ class Role(enum.IntEnum):
 
 class NodeState:
     def __init__(self,
-                 nodes_ids: Collection[NodeId],
+                 _id: NodeId,
                  *,
+                 nodes_ids: Optional[Collection[NodeId]] = None,
                  log: Optional[List[Record]] = None,
                  supported_node_id: Optional[NodeId] = None,
                  term: Term = 0) -> None:
-        self.nodes_ids = nodes_ids
+        self._id = _id
+        self.nodes_ids = {self.id} if nodes_ids is None else nodes_ids
         self._accepted_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._commit_length = 0
         self._leader_node_id = None
@@ -51,6 +53,10 @@ class NodeState:
         assert value >= 0
         assert self.commit_length < value
         self._commit_length = value
+
+    @property
+    def id(self) -> NodeId:
+        return self._id
 
     @property
     def leader_node_id(self) -> Optional[NodeId]:
