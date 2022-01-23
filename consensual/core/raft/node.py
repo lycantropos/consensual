@@ -560,9 +560,12 @@ class Node:
         else:
             assert self._state.role is Role.FOLLOWER
             try:
-                raw_reply = await self._send_call(self._state.leader_node_id,
-                                                  CallPath.LOG, call)
-            except (ClientError, OSError) as exception:
+                raw_reply = await asyncio.wait_for(
+                        self._send_call(self._state.leader_node_id,
+                                        CallPath.LOG, call),
+                        self._reelection_lag
+                        - (self._to_time() - self._last_heartbeat_time))
+            except (asyncio.TimeoutError, ClientError, OSError) as exception:
                 return LogReply(error=format_exception(exception))
             else:
                 return LogReply.from_json(**raw_reply)
