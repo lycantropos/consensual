@@ -625,14 +625,17 @@ class Node:
             return UpdateReply(error=f'{self._state.id} has no leader')
         elif self._state.role is not Role.LEADER:
             try:
-                raw_reply = await self._send_call(self._state.leader_node_id,
-                                                  CallPath.UPDATE, call)
-            except (ClientError, OSError) as exception:
+                raw_reply = await asyncio.wait_for(
+                        self._send_call(self._state.leader_node_id,
+                                        CallPath.UPDATE, call),
+                        self._reelection_lag
+                        - (self._to_time() - self._last_heartbeat_time))
+            except (asyncio.TimeoutError, ClientError, OSError) as exception:
                 return UpdateReply(error=format_exception(exception))
             else:
                 return UpdateReply.from_json(**raw_reply)
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
-                                                      new=call._cluster_state)
+                                                      new=call.cluster_state)
         self._state.log.append(Record(
                 command=Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
                                 parameters=next_cluster_state.as_json()),
