@@ -402,10 +402,6 @@ class Node:
                              field_seeker=seekers.complex_)
 
     @property
-    def cluster_state(self) -> AnyClusterState:
-        return self._cluster_state
-
-    @property
     def logger(self) -> logging.Logger:
         return self._logger
 
