@@ -897,8 +897,7 @@ class Node:
                         state_to_nodes_ids_that_accepted_more_records(state))):
             self._commit([state.log[state.commit_length]])
 
-    def _update_cluster_state(self,
-                              cluster_state: AnyClusterState) -> None:
+    def _update_cluster_state(self, cluster_state: AnyClusterState) -> None:
         new_nodes_ids, old_nodes_ids = (set(cluster_state.nodes_ids),
                                         set(self._cluster_state.nodes_ids))
         self.logger.debug(
