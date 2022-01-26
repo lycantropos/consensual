@@ -32,6 +32,8 @@ from .hints import (NodeId,
                     Time)
 from .node_state import (NodeState,
                          Role,
+                         append_record,
+                         append_records,
                          state_to_nodes_ids_that_accepted_more_records,
                          update_state_nodes_ids,
                          update_state_term)
@@ -551,8 +553,9 @@ class Node:
         if self._state.leader_node_id is None:
             return LogReply(error=f'{self._state.id} has no leader')
         elif self._state.role is Role.LEADER:
-            self._state.log.append(Record(command=call.command,
-                                          term=self._state.term))
+            append_record(self._state,
+                          Record(command=call.command,
+                                 term=self._state.term))
             await self._sync_followers_once()
             assert self._state.accepted_lengths[self._state.id] == len(
                     self._state.log)
@@ -636,10 +639,11 @@ class Node:
                 return UpdateReply.from_json(**raw_reply)
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
                                                       new=call.cluster_state)
-        self._state.log.append(Record(
-                command=Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
-                                parameters=next_cluster_state.as_json()),
-                term=self._state.term))
+        command = Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
+                          parameters=next_cluster_state.as_json())
+        append_record(self._state,
+                      Record(command=command,
+                             term=self._state.term))
         self._update_cluster_state(next_cluster_state)
         await self._sync_followers_once()
         return UpdateReply(error=None)
@@ -767,7 +771,7 @@ class Node:
                             **command.parameters)
                     self._update_cluster_state(cluster_state)
                     break
-            log.extend(new_records)
+            append_records(self._state, new_records)
 
     def _cancel_election_timer(self) -> None:
         self.logger.debug(f'{self._state.id} cancels election timer')
@@ -857,10 +861,11 @@ class Node:
         if self._state.role is Role.LEADER:
             cluster_state = TransitionalClusterState.from_json(**parameters)
             assert cluster_state == self._cluster_state
-            self._state.log.append(Record(
-                    command=Command(action=END_CLUSTER_STATE_UPDATE_ACTION,
-                                    parameters=cluster_state.new.as_json()),
-                    term=self._state.term))
+            command = Command(action=END_CLUSTER_STATE_UPDATE_ACTION,
+                              parameters=cluster_state.new.as_json())
+            append_record(self._state,
+                          Record(command=command,
+                                 term=self._state.term))
             self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
 

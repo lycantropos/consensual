@@ -110,6 +110,14 @@ class NodeState:
         self._term = value
 
 
+def append_record(state: NodeState, record: Record) -> None:
+    state.log.append(record)
+
+
+def append_records(state: NodeState, records: List[Record]) -> None:
+    state.log.extend(records)
+
+
 def state_to_nodes_ids_that_accepted_more_records(state: NodeState
                                                   ) -> Collection[NodeId]:
     return [node_id
