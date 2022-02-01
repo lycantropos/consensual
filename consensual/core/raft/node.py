@@ -784,6 +784,20 @@ class Node:
         self._process_records(records)
         self._state.commit_length += len(records)
 
+    def _delete(self) -> None:
+        self._cancel_election_timer()
+        self._cancel_reelection_timer()
+        self._cancel_sync_timer()
+        nodes_urls = {
+            self._state.id: self._cluster_state.nodes_urls[self._state.id],
+        }
+        self._update_cluster_state(StableClusterState(
+                heartbeat=self._cluster_state.heartbeat,
+                _id=ClusterId(),
+                nodes_urls=nodes_urls,
+        ))
+        self._state.role = Role.FOLLOWER
+
     def _election_timer_callback(self, future: asyncio.Future) -> None:
         if future.cancelled():
             self.logger.debug(f'{self._state.id} has election been cancelled')
@@ -802,13 +816,10 @@ class Node:
     def _end_cluster_state_update(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._state.id} ends cluster state update')
         assert isinstance(self._cluster_state, StableClusterState)
-        assert (self._cluster_state == StableClusterState.from_json(
-                **parameters))
+        assert (self._cluster_state
+                == StableClusterState.from_json(**parameters))
         if self._state.id not in self._cluster_state.nodes_ids:
-            self._state.role = Role.FOLLOWER
-            self._cancel_election_timer()
-            self._cancel_reelection_timer()
-            self._cancel_sync_timer()
+            self._delete()
 
     def _follow(self, leader_node_id: NodeId) -> None:
         self.logger.info(f'{self._state.id} follows {leader_node_id} '
