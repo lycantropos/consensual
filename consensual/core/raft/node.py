@@ -499,8 +499,7 @@ class Node:
             reply = await self._process_update_call(call)
             return web.json_response(reply.as_json())
         else:
-            self.logger.debug(f'{self._state.id} gets initialized')
-            self._start_reelection_timer()
+            self._initialize()
             return web.HTTPOk()
 
     async def _handle_record(self, request: web.Request) -> web.Response:
@@ -830,6 +829,10 @@ class Node:
         self._state.leader_node_id = leader_node_id
         self._state.role = Role.FOLLOWER
         self._cancel_election_timer()
+
+    def _initialize(self) -> None:
+        self.logger.debug(f'{self._state.id} gets initialized')
+        self._start_reelection_timer()
 
     def _lead(self) -> None:
         self.logger.info(
