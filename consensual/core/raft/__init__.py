@@ -6,5 +6,6 @@ from .hints import (Processor,
                     Term)
 from .node import Node
 from .node_state import (NodeId,
-                         NodeState)
+                         NodeState,
+                         Role)
 from .record import Record
