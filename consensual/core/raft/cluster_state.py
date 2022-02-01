@@ -32,6 +32,9 @@ class ClusterId:
                 if isinstance(other, ClusterId)
                 else NotImplemented)
 
+    def __hash__(self) -> int:
+        return hash(self._variants)
+
     @classmethod
     def from_json(cls, _raw: RawClusterId) -> 'ClusterId':
         return cls(*_raw)
