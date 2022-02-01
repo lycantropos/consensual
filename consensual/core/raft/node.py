@@ -25,12 +25,12 @@ from .cluster_state import (AnyClusterState,
 from .command import Command
 from .communication import (Communication,
                             update_communication_registry)
-from .hints import (NodeId,
-                    Processor,
+from .hints import (Processor,
                     Protocol,
                     Term,
                     Time)
-from .node_state import (NodeState,
+from .node_state import (NodeId,
+                         NodeState,
                          Role,
                          append_record,
                          append_records,

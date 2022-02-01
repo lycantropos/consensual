@@ -7,9 +7,8 @@ try:
 except ImportError:
     from typing_extensions import Protocol
 
-Time = Union[float, int]
-NodeId = str
 _T = TypeVar('_T')
-Protocol = Protocol
 Processor = Callable[['Node', _T], None]
+Protocol = Protocol
+Time = Union[float, int]
 Term = int

@@ -7,9 +7,10 @@ from typing import (Collection,
 
 from reprit.base import generate_repr
 
-from .hints import (NodeId,
-                    Term)
+from .hints import Term
 from .record import Record
+
+NodeId = str
 
 
 class Role(enum.IntEnum):

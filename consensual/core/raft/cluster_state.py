@@ -7,8 +7,8 @@ from typing import (Any,
 from reprit.base import generate_repr
 from yarl import URL
 
-from .hints import (NodeId,
-                    Time)
+from .hints import Time
+from .node_state import NodeId
 
 
 class StableClusterState:
