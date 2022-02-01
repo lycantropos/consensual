@@ -15,9 +15,9 @@ from reprit.base import generate_repr
 from yarl import URL
 
 from .hints import Time
-from .utils import (Error,
-                    Ok,
-                    Result)
+from .result import (Error,
+                     Ok,
+                     Result)
 
 _Receiver = TypeVar('_Receiver')
 _Path = TypeVar('_Path')
