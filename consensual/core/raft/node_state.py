@@ -30,11 +30,12 @@ class NodeState:
         self._id = _id
         self.nodes_ids = {self.id} if nodes_ids is None else nodes_ids
         self._accepted_lengths = {node_id: 0 for node_id in self.nodes_ids}
+        self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._commit_length = 0
         self._leader_node_id = None
         self._log = [] if log is None else log
+        self._rejectors_nodes_ids = set()
         self._role = Role.FOLLOWER
-        self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._supported_node_id = supported_node_id
         self._supporters_nodes_ids = set()
         self._term = term
@@ -74,6 +75,10 @@ class NodeState:
     @property
     def log_term(self) -> Term:
         return self.log[-1].term if self.log else 0
+
+    @property
+    def rejectors_nodes_ids(self) -> MutableSet[NodeId]:
+        return self._rejectors_nodes_ids
 
     @property
     def role(self) -> Role:

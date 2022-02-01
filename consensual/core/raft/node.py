@@ -3,6 +3,7 @@ import enum
 import json
 import logging.config
 import random
+import uuid
 from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
@@ -20,6 +21,8 @@ from reprit.base import generate_repr
 from yarl import URL
 
 from .cluster_state import (AnyClusterState,
+                            ClusterId,
+                            RawClusterId,
                             StableClusterState,
                             TransitionalClusterState)
 from .command import Command
@@ -106,11 +109,12 @@ class LogReply:
 
 
 class SyncCall:
-    __slots__ = ('_commit_length', '_node_id', '_prefix_length',
+    __slots__ = ('_cluster_id', '_commit_length', '_node_id', '_prefix_length',
                  '_prefix_term', '_suffix', '_term')
 
     def __new__(cls,
                 *,
+                cluster_id: ClusterId,
                 commit_length: int,
                 node_id: NodeId,
                 prefix_length: int,
@@ -119,12 +123,19 @@ class SyncCall:
                 term: Term) -> 'SyncCall':
         self = super().__new__(cls)
         (
-            self._commit_length, self._node_id, self._prefix_length,
-            self._prefix_term, self._suffix, self._term
-        ) = commit_length, node_id, prefix_length, prefix_term, suffix, term
+            self._cluster_id, self._commit_length, self._node_id,
+            self._prefix_length, self._prefix_term, self._suffix, self._term
+        ) = (
+            cluster_id, commit_length, node_id, prefix_length, prefix_term,
+            suffix, term,
+        )
         return self
 
     __repr__ = generate_repr(__new__)
+
+    @property
+    def cluster_id(self) -> ClusterId:
+        return self._cluster_id
 
     @property
     def commit_length(self) -> int:
@@ -153,13 +164,15 @@ class SyncCall:
     @classmethod
     def from_json(cls,
                   *,
+                  cluster_id: RawClusterId,
                   commit_length: int,
                   node_id: NodeId,
                   prefix_length: int,
                   prefix_term: Term,
                   suffix: List[Dict[str, Any]],
                   term: Term) -> 'SyncCall':
-        return cls(commit_length=commit_length,
+        return cls(cluster_id=ClusterId.from_json(cluster_id),
+                   commit_length=commit_length,
                    node_id=node_id,
                    prefix_length=prefix_length,
                    prefix_term=prefix_term,
@@ -167,7 +180,8 @@ class SyncCall:
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'commit_length': self.commit_length,
+        return {'cluster_id': self.cluster_id.as_json(),
+                'commit_length': self.commit_length,
                 'node_id': self.node_id,
                 'prefix_length': self.prefix_length,
                 'prefix_term': self.prefix_term,
@@ -176,18 +190,21 @@ class SyncCall:
 
 
 class SyncReply:
-    __slots__ = '_accepted_length', '_node_id', '_successful', '_term'
+    __slots__ = ('_accepted_length', '_cluster_id', '_node_id', '_successful',
+                 '_term')
 
     def __new__(cls,
                 *,
                 accepted_length: int,
+                cluster_id: ClusterId,
                 node_id: NodeId,
                 successful: bool,
                 term: Term) -> 'SyncReply':
         self = super().__new__(cls)
-        self._accepted_length, self._node_id, self._successful, self._term = (
-            accepted_length, node_id, successful, term
-        )
+        (
+            self._accepted_length, self._cluster_id, self._node_id,
+            self._successful, self._term
+        ) = accepted_length, cluster_id, node_id, successful, term
         return self
 
     __repr__ = generate_repr(__new__)
@@ -195,6 +212,10 @@ class SyncReply:
     @property
     def accepted_length(self) -> int:
         return self._accepted_length
+
+    @property
+    def cluster_id(self) -> ClusterId:
+        return self._cluster_id
 
     @property
     def node_id(self) -> NodeId:
@@ -208,10 +229,23 @@ class SyncReply:
     def term(self) -> Term:
         return self._term
 
-    from_json = classmethod(__new__)
+    @classmethod
+    def from_json(cls,
+                  *,
+                  accepted_length: int,
+                  cluster_id: RawClusterId,
+                  node_id: NodeId,
+                  successful: bool,
+                  term: Term) -> 'SyncReply':
+        return cls(accepted_length=accepted_length,
+                   cluster_id=ClusterId.from_json(cluster_id),
+                   node_id=node_id,
+                   successful=successful,
+                   term=term)
 
     def as_json(self) -> Dict[str, Any]:
         return {'accepted_length': self.accepted_length,
+                'cluster_id': self.cluster_id.as_json(),
                 'node_id': self.node_id,
                 'successful': self.successful,
                 'term': self.term}
@@ -260,29 +294,27 @@ class UpdateReply:
 
 
 class VoteCall:
-    __slots__ = '_log_length', '_log_term', '_node_id', '_term'
+    __slots__ = '_cluster_id', '_log_length', '_log_term', '_node_id', '_term'
 
     def __new__(cls,
                 *,
+                cluster_id: ClusterId,
                 log_length: int,
                 log_term: Term,
                 node_id: NodeId,
                 term: Term) -> 'VoteCall':
         self = super().__new__(cls)
-        self._log_length, self._log_term, self._node_id, self._term = (
-            log_length, log_term, node_id, term
-        )
+        (
+            self._cluster_id, self._log_length, self._log_term, self._node_id,
+            self._term
+        ) = cluster_id, log_length, log_term, node_id, term
         return self
 
     __repr__ = generate_repr(__new__)
 
     @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @property
-    def term(self) -> Term:
-        return self._term
+    def cluster_id(self) -> ClusterId:
+        return self._cluster_id
 
     @property
     def log_length(self) -> int:
@@ -292,30 +324,56 @@ class VoteCall:
     def log_term(self) -> Term:
         return self._log_term
 
-    from_json = classmethod(__new__)
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
+    @property
+    def term(self) -> Term:
+        return self._term
+
+    @classmethod
+    def from_json(cls,
+                  *,
+                  cluster_id: RawClusterId,
+                  log_length: int,
+                  log_term: Term,
+                  node_id: NodeId,
+                  term: Term) -> 'VoteCall':
+        return cls(cluster_id=ClusterId.from_json(cluster_id),
+                   log_length=log_length,
+                   log_term=log_term,
+                   node_id=node_id,
+                   term=term)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'log_length': self.log_length,
+        return {'cluster_id': self.cluster_id.as_json(),
+                'log_length': self.log_length,
                 'log_term': self.log_term,
                 'node_id': self.node_id,
                 'term': self.term}
 
 
 class VoteReply:
-    __slots__ = '_node_id', '_supports', '_term'
+    __slots__ = '_cluster_id', '_node_id', '_supports', '_term'
 
     def __new__(cls,
                 *,
+                cluster_id: ClusterId,
                 node_id: NodeId,
                 supports: bool,
                 term: Term) -> 'VoteReply':
         self = super().__new__(cls)
-        self._node_id = node_id
-        self._supports = supports
-        self._term = term
+        self._cluster_id, self._node_id, self._supports, self._term = (
+            cluster_id, node_id, supports, term,
+        )
         return self
 
     __repr__ = generate_repr(__new__)
+
+    @property
+    def cluster_id(self) -> ClusterId:
+        return self._cluster_id
 
     @property
     def node_id(self) -> NodeId:
@@ -329,10 +387,21 @@ class VoteReply:
     def term(self) -> Term:
         return self._term
 
-    from_json = classmethod(__new__)
+    @classmethod
+    def from_json(cls,
+                  *,
+                  cluster_id: RawClusterId,
+                  node_id: NodeId,
+                  supports: bool,
+                  term: Term) -> 'VoteReply':
+        return cls(cluster_id=ClusterId.from_json(cluster_id),
+                   node_id=node_id,
+                   supports=supports,
+                   term=term)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'node_id': self.node_id,
+        return {'cluster_id': self.cluster_id.as_json(),
+                'node_id': self.node_id,
                 'supports': self.supports,
                 'term': self.term}
 
@@ -354,7 +423,8 @@ class Node:
                  ) -> 'Node':
         id_ = node_url_to_id(url)
         return cls(NodeState(id_),
-                   StableClusterState(heartbeat=heartbeat,
+                   StableClusterState(ClusterId(),
+                                      heartbeat=heartbeat,
                                       nodes_urls={id_: url}),
                    logger=logger,
                    processors=processors)
@@ -459,9 +529,10 @@ class Node:
                      .format(id=self._state.id,
                              nodes_ids=', '.join(nodes_urls_to_delete))))
             call = UpdateCall(StableClusterState(
+                    generate_cluster_id(),
+                    heartbeat=self._cluster_state.heartbeat,
                     nodes_urls=subtract_mapping(self._cluster_state.nodes_urls,
-                                                nodes_urls_to_delete),
-                    heartbeat=self._cluster_state.heartbeat))
+                                                nodes_urls_to_delete)))
             reply = await self._process_update_call(call)
             return web.json_response(reply.as_json())
         else:
@@ -469,8 +540,9 @@ class Node:
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
             del rest_nodes_urls[self._state.id]
             call = UpdateCall(
-                    StableClusterState(nodes_urls=rest_nodes_urls,
-                                       heartbeat=self._cluster_state.heartbeat))
+                    StableClusterState(generate_cluster_id(),
+                                       heartbeat=self._cluster_state.heartbeat,
+                                       nodes_urls=rest_nodes_urls))
             reply = await self._process_update_call(call)
             return web.json_response(reply.as_json())
 
@@ -493,9 +565,10 @@ class Node:
                               .format(id=self._state.id,
                                       nodes_ids=', '.join(nodes_urls_to_add)))
             call = UpdateCall(StableClusterState(
+                    generate_cluster_id(),
+                    heartbeat=self._cluster_state.heartbeat,
                     nodes_urls=unite_mappings(self._cluster_state.nodes_urls,
-                                              nodes_urls_to_add),
-                    heartbeat=self._cluster_state.heartbeat))
+                                              nodes_urls_to_add)))
             reply = await self._process_update_call(call)
             return web.json_response(reply.as_json())
         else:
@@ -511,35 +584,39 @@ class Node:
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
         prefix_length = self._state.sent_lengths[node_id]
-        call = SyncCall(node_id=self._state.id,
-                        term=self._state.term,
+        call = SyncCall(cluster_id=self._cluster_state.id,
+                        commit_length=self._state.commit_length,
+                        node_id=self._state.id,
                         prefix_length=prefix_length,
                         prefix_term=(self._state.log[prefix_length - 1].term
                                      if prefix_length
                                      else 0),
-                        commit_length=self._state.commit_length,
-                        suffix=self._state.log[prefix_length:])
+                        suffix=self._state.log[prefix_length:],
+                        term=self._state.term)
         try:
             raw_reply = await self._send_call(node_id, CallPath.SYNC, call)
         except (ClientError, OSError):
-            return SyncReply(node_id=node_id,
+            return SyncReply(accepted_length=0,
+                             cluster_id=ClusterId(),
+                             node_id=node_id,
                              term=self._state.term,
-                             accepted_length=0,
                              successful=False)
         else:
             return SyncReply.from_json(**raw_reply)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
-        call = VoteCall(node_id=self._state.id,
+        call = VoteCall(cluster_id=self._cluster_state.id,
+                        node_id=self._state.id,
                         term=self._state.term,
                         log_length=len(self._state.log),
                         log_term=self._state.log_term)
         try:
             raw_reply = await self._send_call(node_id, CallPath.VOTE, call)
         except (ClientError, OSError):
-            return VoteReply(node_id=node_id,
-                             term=self._state.term,
-                             supports=False)
+            return VoteReply(cluster_id=ClusterId(),
+                             node_id=node_id,
+                             supports=False,
+                             term=self._state.term)
         else:
             return VoteReply.from_json(**raw_reply)
 
@@ -570,6 +647,13 @@ class Node:
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._state.id} processes {call}')
+        if (self._cluster_state.id
+                and not self._cluster_state.id.agrees_with(call.cluster_id)):
+            return SyncReply(accepted_length=0,
+                             cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
+                             term=self._state.term,
+                             successful=False)
         self._last_heartbeat_time = self._to_time()
         self._restart_reelection_timer()
         if call.term > self._state.term:
@@ -587,25 +671,31 @@ class Node:
             if call.commit_length > self._state.commit_length:
                 self._commit(self._state.log[self._state.commit_length
                                              :call.commit_length])
-            return SyncReply(node_id=self._state.id,
-                             term=self._state.term,
-                             accepted_length=(call.prefix_length
+            return SyncReply(accepted_length=(call.prefix_length
                                               + len(call.suffix)),
+                             cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
+                             term=self._state.term,
                              successful=True)
         else:
-            return SyncReply(node_id=self._state.id,
+            return SyncReply(accepted_length=0,
+                             cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
                              term=self._state.term,
-                             accepted_length=0,
                              successful=False)
 
     async def _process_sync_reply(self, reply: SyncReply) -> None:
         self.logger.debug(f'{self._state.id} processes {reply}')
-        if reply.term == self._state.term and self._state.role is Role.LEADER:
+        if not self._cluster_state.id.agrees_with(reply.cluster_id):
+            pass
+        elif (reply.term == self._state.term
+              and self._state.role is Role.LEADER):
             if (reply.successful
                     and (reply.accepted_length
                          >= self._state.accepted_lengths[reply.node_id])):
                 self._state.accepted_lengths[reply.node_id] = (
-                    reply.accepted_length)
+                    reply.accepted_length
+                )
                 self._state.sent_lengths[reply.node_id] = reply.accepted_length
                 self._try_commit()
             elif self._state.sent_lengths[reply.node_id] > 0:
@@ -635,6 +725,9 @@ class Node:
         if not self._cluster_state.stable:
             return UpdateReply(error='Cluster is currently '
                                      'in transitional state.')
+        if len(self._cluster_state.nodes_ids) == 1:
+            self._delete()
+            return UpdateReply(error=None)
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
                                                       new=call.cluster_state)
         command = Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
@@ -648,11 +741,20 @@ class Node:
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self._state.id} processes {call}')
-        if call.node_id not in self._cluster_state.nodes_ids:
-            self.logger.debug(
-                    f'{self._state.id} skips voting for {call.node_id} '
-                    f'because it is not in cluster state')
-            return VoteReply(node_id=self._state.id,
+        if not self._cluster_state.id.agrees_with(call.cluster_id):
+            self.logger.debug(f'{self._state.id} skips voting '
+                              f'for {call.node_id} '
+                              f'because it has conflicting cluster id')
+            return VoteReply(cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
+                             term=self._state.term,
+                             supports=False)
+        elif call.node_id not in self._cluster_state.nodes_ids:
+            self.logger.debug(f'{self._state.id} skips voting '
+                              f'for {call.node_id} '
+                              f'because it is not in cluster state')
+            return VoteReply(cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
                              term=self._state.term,
                              supports=False)
         elif (self._state.leader_node_id is not None
@@ -662,7 +764,8 @@ class Node:
                     f'{self._state.id} skips voting for {call.node_id} '
                     f'because leader {self._state.leader_node_id} '
                     f'can be alive')
-            return VoteReply(node_id=self._state.id,
+            return VoteReply(cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
                              term=self._state.term,
                              supports=False)
         if call.term > self._state.term:
@@ -674,19 +777,31 @@ class Node:
                 and (self._state.supported_node_id is None
                      or self._state.supported_node_id == call.node_id)):
             self._state.supported_node_id = call.node_id
-            return VoteReply(node_id=self._state.id,
+            return VoteReply(cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
                              term=self._state.term,
                              supports=True)
         else:
-            return VoteReply(node_id=self._state.id,
+            return VoteReply(cluster_id=self._cluster_state.id,
+                             node_id=self._state.id,
                              term=self._state.term,
                              supports=False)
 
     async def _process_vote_reply(self, reply: VoteReply) -> None:
         self.logger.debug(f'{self._state.id} processes {reply}')
-        if (self._state.role is Role.CANDIDATE
-                and reply.term == self._state.term
-                and reply.supports):
+        if self._state.role is not Role.CANDIDATE:
+            pass
+        elif not self._cluster_state.id.agrees_with(reply.cluster_id):
+            pass
+        elif (not self._cluster_state.stable
+              and self._cluster_state.new.id == reply.cluster_id
+              and self._state.id not in self._cluster_state.new.nodes_ids):
+            assert not reply.supports
+            self._state.rejectors_nodes_ids.add(reply.node_id)
+            if self._cluster_state.new.has_majority(
+                    self._state.rejectors_nodes_ids):
+                self._delete()
+        elif reply.term == self._state.term and reply.supports:
             self._state.supporters_nodes_ids.add(reply.node_id)
             if self._cluster_state.has_majority(
                     self._state.supporters_nodes_ids):
@@ -701,6 +816,7 @@ class Node:
                           f'for term {self._state.term + 1}')
         update_state_term(self._state, self._state.term + 1)
         self._state.role = Role.CANDIDATE
+        self._state.rejectors_nodes_ids.clear()
         self._state.supporters_nodes_ids.clear()
         start = self._to_time()
         try:
@@ -787,6 +903,7 @@ class Node:
         self._state.commit_length += len(records)
 
     def _delete(self) -> None:
+        self.logger.debug(f'{self._state.id} gets deleted')
         self._cancel_election_timer()
         self._cancel_reelection_timer()
         self._cancel_sync_timer()
@@ -794,8 +911,8 @@ class Node:
             self._state.id: self._cluster_state.nodes_urls[self._state.id],
         }
         self._update_cluster_state(StableClusterState(
+                ClusterId(),
                 heartbeat=self._cluster_state.heartbeat,
-                _id=ClusterId(),
                 nodes_urls=nodes_urls,
         ))
         self._state.role = Role.FOLLOWER
@@ -832,6 +949,14 @@ class Node:
 
     def _initialize(self) -> None:
         self.logger.debug(f'{self._state.id} gets initialized')
+        nodes_urls = {
+            self._state.id: self._cluster_state.nodes_urls[self._state.id],
+        }
+        self._update_cluster_state(StableClusterState(
+                generate_cluster_id(),
+                heartbeat=self._cluster_state.heartbeat,
+                nodes_urls=nodes_urls,
+        ))
         self._start_reelection_timer()
 
     def _lead(self) -> None:
@@ -920,6 +1045,10 @@ class Node:
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)
         update_state_nodes_ids(self._state, cluster_state.nodes_ids)
+
+
+def generate_cluster_id() -> ClusterId:
+    return ClusterId(uuid.uuid4().hex)
 
 
 def node_url_to_id(url: URL) -> NodeId:

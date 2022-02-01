@@ -1,4 +1,5 @@
-from .cluster_state import (StableClusterState,
+from .cluster_state import (ClusterId,
+                            StableClusterState,
                             TransitionalClusterState)
 from .command import Command
 from .hints import (Processor,

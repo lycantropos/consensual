@@ -1,4 +1,5 @@
-from .core.raft import (Command,
+from .core.raft import (ClusterId,
+                        Command,
                         Node,
                         NodeId,
                         NodeState,
@@ -8,6 +9,7 @@ from .core.raft import (Command,
                         Term,
                         TransitionalClusterState)
 
+ClusterId = ClusterId
 Command = Command
 Node = Node
 NodeId = NodeId
