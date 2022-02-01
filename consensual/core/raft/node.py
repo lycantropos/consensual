@@ -899,28 +899,6 @@ class Node:
             self._commit([state.log[state.commit_length]])
 
     def _update_cluster_state(self, cluster_state: AnyClusterState) -> None:
-        new_nodes_ids, old_nodes_ids = (set(cluster_state.nodes_ids),
-                                        set(self._cluster_state.nodes_ids))
-        self.logger.debug(
-                f'{self._state.id} changes cluster state by '
-                + ' and '.join(
-                        filter(None,
-                               [('going from stable to transitional'
-                                 if self._cluster_state.stable
-                                 else 'going from transitional to stable')
-                                if (cluster_state.stable
-                                    is not self._cluster_state.stable)
-                                else '',
-                                'adding '
-                                + ', '.join(sorted(new_nodes_ids
-                                                   - old_nodes_ids))
-                                if new_nodes_ids - old_nodes_ids
-                                else '',
-                                'removing '
-                                + ', '.join(sorted(old_nodes_ids
-                                                   - new_nodes_ids))
-                                if old_nodes_ids - new_nodes_ids
-                                else ''])))
         self._cluster_state = cluster_state
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)
