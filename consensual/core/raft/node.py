@@ -633,6 +633,9 @@ class Node:
                 return UpdateReply(error=format_exception(exception))
             else:
                 return UpdateReply.from_json(**raw_reply)
+        if not self._cluster_state.stable:
+            return UpdateReply(error='Cluster is currently '
+                                     'in transitional state.')
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
                                                       new=call.cluster_state)
         command = Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
