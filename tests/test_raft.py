@@ -143,11 +143,9 @@ class RunningNode:
 
     def _get(self, endpoint: str) -> Response:
         last_error = None
-        for _ in range(5):
+        for _ in range(10):
             try:
-                response = self._session.get(endpoint,
-                                             timeout=(self.heartbeat,
-                                                      self.heartbeat))
+                response = self._session.get(endpoint)
             except OSError as error:
                 last_error = error
                 time.sleep(1)
