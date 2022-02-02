@@ -957,7 +957,7 @@ class Node:
                 heartbeat=self._cluster_state.heartbeat,
                 nodes_urls=nodes_urls,
         ))
-        self._start_reelection_timer()
+        self._lead()
 
     def _lead(self) -> None:
         self.logger.info(
