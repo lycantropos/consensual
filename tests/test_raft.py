@@ -57,13 +57,19 @@ class RunningNodeState:
                  role: Role,
                  supported_node_id: Optional[NodeId],
                  term: Term) -> None:
-        self.id = _id
+        self._id = _id
         self.commit_length = commit_length
         self.leader_node_id = leader_node_id
         self.log = log
         self.role = role
         self.supported_node_id = supported_node_id
         self.term = term
+
+    __repr__ = generate_repr(__init__)
+
+    @property
+    def id(self) -> NodeId:
+        return self._id
 
 
 class RunningNode:
