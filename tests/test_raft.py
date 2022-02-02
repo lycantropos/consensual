@@ -103,8 +103,7 @@ class RunningNode:
         return self.load_cluster_state(), self.load_node_state()
 
     def load_cluster_state(self) -> RunningClusterState:
-        response = requests.get(str(self.url.with_path('/cluster')),
-                                timeout=self.heartbeat)
+        response = requests.get(str(self.url.with_path('/cluster')))
         response.raise_for_status()
         raw_state = response.json()
         raw_id, heartbeat = raw_state['id'], raw_state['heartbeat']
@@ -112,8 +111,7 @@ class RunningNode:
                                    heartbeat=heartbeat)
 
     def load_node_state(self) -> RunningNodeState:
-        response = requests.get(str(self.url.with_path('/node')),
-                                timeout=self.heartbeat)
+        response = requests.get(str(self.url.with_path('/node')))
         response.raise_for_status()
         raw_state = response.json()
         (
