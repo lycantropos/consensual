@@ -91,7 +91,7 @@ steps:
     displayName: 'Run doctests'
   - bash: python -m pip install -r requirements-tests.txt
     displayName: 'Install tests dependencies'
-  - bash: coverage run --concurrency=multiprocessing,thread --append -m pytest
+  - bash: coverage run --concurrency=multiprocessing,thread -m pytest
     displayName: 'Run tests'
   - bash: coverage combine --append && coverage xml
     displayName: 'Collect coverage'
