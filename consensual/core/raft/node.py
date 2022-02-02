@@ -523,10 +523,11 @@ class Node:
             nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
                                      - set(self._cluster_state.nodes_ids))
             if nonexistent_nodes_ids:
-                raise web.HTTPBadRequest(
-                        reason
+                reply = UpdateReply(
+                        error
                         =('nonexistent node(s) found: {nodes_ids}'
                           .format(nodes_ids=', '.join(nonexistent_nodes_ids))))
+                return web.json_response(reply.as_json())
             self.logger.debug(
                     ('{id} initializes removal of {nodes_ids}'
                      .format(id=self._state.id,
