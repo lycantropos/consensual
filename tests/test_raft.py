@@ -20,6 +20,7 @@ from hypothesis.stateful import (Bundle,
                                  consumes,
                                  invariant,
                                  rule)
+from reprit.base import generate_repr
 from yarl import URL
 
 from consensual.raft import (ClusterId,
@@ -70,6 +71,8 @@ class RunningNode:
         self._process = multiprocessing.Process(target=_run_node,
                                                 args=(url, heartbeat))
         self._process.start()
+
+    __repr__ = generate_repr(__init__)
 
     def add(self, node: 'RunningNode') -> None:
         assert requests.post(self._url_string,
