@@ -11,8 +11,7 @@ from functools import partial
 from typing import (Iterator,
                     List,
                     Optional,
-                    Set,
-                    Tuple)
+                    Set)
 
 import requests
 from hypothesis.stateful import (Bundle,
@@ -20,6 +19,8 @@ from hypothesis.stateful import (Bundle,
                                  invariant,
                                  rule)
 from reprit.base import generate_repr
+from requests import (Response,
+                      Session)
 from yarl import URL
 
 from consensual.raft import (ClusterId,
@@ -84,6 +85,7 @@ class RunningNode:
         self._process = multiprocessing.Process(target=_run_node,
                                                 args=(url, heartbeat))
         self._process.start()
+        self._session = Session()
 
     __repr__ = generate_repr(__init__)
 
@@ -102,7 +104,7 @@ class RunningNode:
         return response.json()['error']
 
     def load_cluster_state(self) -> RunningClusterState:
-        response = requests.get(str(self.url.with_path('/cluster')))
+        response = self._get(str(self.url.with_path('/cluster')))
         response.raise_for_status()
         raw_state = response.json()
         raw_id, heartbeat, nodes_ids = (
@@ -113,7 +115,7 @@ class RunningNode:
                                    nodes_ids=nodes_ids)
 
     def load_node_state(self) -> RunningNodeState:
-        response = requests.get(str(self.url.with_path('/node')))
+        response = self._get(str(self.url.with_path('/node')))
         response.raise_for_status()
         raw_state = response.json()
         (
@@ -134,9 +136,26 @@ class RunningNode:
                                 term=term)
 
     def stop(self) -> None:
+        self._session.close()
         self._process.kill()
         while is_url_reachable(self.url):
             time.sleep(0.5)
+
+    def _get(self, endpoint: str) -> Response:
+        last_error = None
+        for _ in range(5):
+            try:
+                response = self._session.get(endpoint,
+                                             timeout=(self.heartbeat,
+                                                      self.heartbeat))
+            except OSError as error:
+                last_error = error
+                time.sleep(1)
+            else:
+                break
+        else:
+            raise last_error
+        return response
 
 
 def is_url_reachable(url: URL) -> bool:
