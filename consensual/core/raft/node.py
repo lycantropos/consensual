@@ -4,7 +4,10 @@ import json
 import logging.config
 import random
 import uuid
-from asyncio import get_event_loop
+from asyncio import (AbstractEventLoop,
+                     get_event_loop,
+                     new_event_loop,
+                     set_event_loop)
 from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from typing import (Any,
@@ -439,7 +442,7 @@ class Node:
         self._url = self._cluster_state.nodes_urls[self._state.id]
         self._logger = logging.getLogger() if logger is None else logger
         self._processors = {} if processors is None else dict(processors)
-        self._loop = get_event_loop()
+        self._loop = safe_get_event_loop()
         self._app = web.Application()
         self._commands_executor = ThreadPoolExecutor(max_workers=1)
         self._communication: Communication[NodeId, CallPath] = Communication(
@@ -1067,6 +1070,15 @@ class Node:
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)
         update_state_nodes_ids(self._state, cluster_state.nodes_ids)
+
+
+def safe_get_event_loop() -> AbstractEventLoop:
+    try:
+        result = get_event_loop()
+    except RuntimeError:
+        result = new_event_loop()
+        set_event_loop(result)
+    return result
 
 
 def generate_cluster_id() -> ClusterId:
