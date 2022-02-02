@@ -939,6 +939,7 @@ class Node:
                 heartbeat=self._cluster_state.heartbeat,
                 nodes_urls={self._state.id: self.url},
         ))
+        self._state.leader_node_id = None
         self._state.role = Role.FOLLOWER
 
     def _election_timer_callback(self, future: asyncio.Future) -> None:
