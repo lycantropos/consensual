@@ -38,7 +38,13 @@ class RunningClusterState:
                  _id: ClusterId,
                  *,
                  heartbeat: float) -> None:
-        self.heartbeat, self.id = heartbeat, _id
+        self.heartbeat, self._id = heartbeat, _id
+
+    __repr__ = generate_repr(__init__)
+
+    @property
+    def id(self) -> ClusterId:
+        return self._id
 
 
 class RunningNodeState:
