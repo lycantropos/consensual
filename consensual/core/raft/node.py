@@ -748,7 +748,8 @@ class Node:
         if not self._cluster_state.stable:
             return UpdateReply(error='Cluster is currently '
                                      'in transitional state.')
-        if len(self._cluster_state.nodes_ids) == 1:
+        if (len(self._cluster_state.nodes_ids) == 1
+                and not call.cluster_state.nodes_ids):
             self._delete()
             return UpdateReply(error=None)
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
