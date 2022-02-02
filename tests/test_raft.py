@@ -137,9 +137,10 @@ class RunningNode:
 
     def stop(self) -> None:
         self._session.close()
-        self._process.kill()
-        while is_url_reachable(self.url):
+        while self._process.is_alive():
+            self._process.kill()
             time.sleep(0.5)
+        assert not is_url_reachable(self.url)
 
     def _get(self, endpoint: str) -> Response:
         last_error = None
@@ -159,13 +160,13 @@ class RunningNode:
 def is_url_reachable(url: URL) -> bool:
     connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connection.settimeout(2)
-    try:
-        connection.connect((url.host, url.port))
-    except OSError:
-        return False
-    else:
-        connection.close()
-        return True
+    with connection:
+        try:
+            connection.connect((url.host, url.port))
+        except OSError:
+            return False
+        else:
+            return True
 
 
 def to_logger(name: str,
