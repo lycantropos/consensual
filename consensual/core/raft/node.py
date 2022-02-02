@@ -582,10 +582,11 @@ class Node:
             existing_nodes_ids = (nodes_urls_to_add.keys()
                                   & set(self._cluster_state.nodes_ids))
             if existing_nodes_ids:
-                raise web.HTTPBadRequest(
-                        reason
+                reply = UpdateReply(
+                        error
                         =('already existing node(s) found: {nodes_ids}'
                           .format(nodes_ids=', '.join(existing_nodes_ids))))
+                return web.json_response(reply.as_json())
             self.logger.debug('{id} initializes adding of {nodes_ids}'
                               .format(id=self._state.id,
                                       nodes_ids=', '.join(nodes_urls_to_add)))
