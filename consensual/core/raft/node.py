@@ -411,7 +411,7 @@ class Node:
                  '_communication', '_election_duration', '_election_task',
                  '_last_heartbeat_time', '_logger', '_loop', '_patch_routes',
                  '_processors', '_reelection_lag', '_reelection_task',
-                 '_state', '_sync_task')
+                 '_state', '_sync_task', '_url')
 
     @classmethod
     def from_url(cls,
@@ -436,6 +436,7 @@ class Node:
                  logger: Optional[logging.Logger] = None,
                  processors: Optional[Mapping[str, Processor]] = None) -> None:
         self._cluster_state, self._state = _cluster_state, _state
+        self._url = self._cluster_state.nodes_urls[self._state.id]
         self._logger = logging.getLogger() if logger is None else logger
         self._processors = {} if processors is None else dict(processors)
         self._loop = get_event_loop()
@@ -483,7 +484,7 @@ class Node:
 
     @property
     def url(self) -> URL:
-        return self._cluster_state.nodes_urls[self._state.id]
+        return self._url
 
     def run(self) -> None:
         url = self.url
@@ -931,13 +932,10 @@ class Node:
         self._cancel_election_timer()
         self._cancel_reelection_timer()
         self._cancel_sync_timer()
-        nodes_urls = {
-            self._state.id: self._cluster_state.nodes_urls[self._state.id],
-        }
         self._update_cluster_state(StableClusterState(
                 ClusterId(),
                 heartbeat=self._cluster_state.heartbeat,
-                nodes_urls=nodes_urls,
+                nodes_urls={self._state.id: self.url},
         ))
         self._state.role = Role.FOLLOWER
 
@@ -973,13 +971,10 @@ class Node:
 
     def _initialize(self) -> None:
         self.logger.debug(f'{self._state.id} gets initialized')
-        nodes_urls = {
-            self._state.id: self._cluster_state.nodes_urls[self._state.id],
-        }
         self._update_cluster_state(StableClusterState(
                 generate_cluster_id(),
                 heartbeat=self._cluster_state.heartbeat,
-                nodes_urls=nodes_urls,
+                nodes_urls={self._state.id: self.url},
         ))
         self._lead()
 
