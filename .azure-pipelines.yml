@@ -93,7 +93,7 @@ steps:
     displayName: 'Install tests dependencies'
   - bash: coverage run --concurrency=multiprocessing --append -m pytest
     displayName: 'Run tests'
-  - bash: coverage combine && coverage xml
+  - bash: coverage combine --append && coverage xml
     displayName: 'Collect coverage'
   - bash: python -m codecov -f coverage.xml -X gcov --build "$AGENT_JOBNAME"
     condition: succeeded()
