@@ -213,7 +213,13 @@ class Cluster(RuleBasedStateMachine):
     def add_nodes(self,
                   initialized_nodes: List[RunningNode],
                   nodes: List[RunningNode]) -> List[RunningNode]:
+        nodes = nodes[:len(initialized_nodes)]
         _exhaust(self._executor.map(RunningNode.add, initialized_nodes, nodes))
+        states = self._load_states(nodes)
+        while any(node_state.leader_node_id is None
+                  for _, node_state in states):
+            time.sleep(1)
+            states = self._load_states(nodes)
         return nodes
 
     @rule(target=initialized_nodes,
@@ -262,8 +268,11 @@ class Cluster(RuleBasedStateMachine):
         self._executor.shutdown()
 
     def update_states(self) -> None:
-        self._states = list(self._executor.map(RunningNode.load_state,
-                                               self._nodes))
+        self._states = self._load_states(self._nodes)
+
+    def _load_states(self, nodes: List[RunningNode]
+                     ) -> List[Tuple[RunningClusterState, RunningNodeState]]:
+        return list(self._executor.map(RunningNode.load_state, nodes))
 
 
 def _exhaust(iterator: Iterator) -> None:
