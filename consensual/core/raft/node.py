@@ -458,6 +458,8 @@ class Node:
             CallPath.VOTE: (VoteCall.from_json, self._process_vote_call),
         }
         self._app.router.add_delete('/', self._handle_delete)
+        self._app.router.add_get('/cluster', self._handle_get_cluster)
+        self._app.router.add_get('/node', self._handle_get_node)
         self._app.router.add_post('/', self._handle_post)
         self._app.router.add_route(self._communication.HTTP_METHOD, '/',
                                    self._handle_communication)
@@ -545,6 +547,27 @@ class Node:
                                        nodes_urls=rest_nodes_urls))
             reply = await self._process_update_call(call)
             return web.json_response(reply.as_json())
+
+    async def _handle_get_cluster(self, request: web.Request) -> web.Response:
+        cluster_state_json = {
+            'id': self._cluster_state.id.as_json(),
+            'heartbeat': self._cluster_state.heartbeat,
+            'nodes_ids': list(self._cluster_state.nodes_ids),
+        }
+        return web.json_response(cluster_state_json)
+
+    async def _handle_get_node(self, request: web.Request) -> web.Response:
+        node_state_json = {
+            'id': self._state.id,
+            'commit_length': self._state.commit_length,
+            'leader_node_id': self._state.leader_node_id,
+            'log': [record.as_json() for record in self._state.log],
+            'role': self._state.role,
+            'supported_node_id': self._state.supported_node_id,
+            'supporters_nodes_ids': list(self._state.supporters_nodes_ids),
+            'term': self._state.term,
+        }
+        return web.json_response(node_state_json)
 
     async def _handle_post(self, request: web.Request) -> web.Response:
         text = await request.text()
