@@ -1,9 +1,9 @@
-import multiprocessing
-
 from hypothesis import strategies
 from yarl import URL
 
 from consensual.core.raft.node import node_url_to_id
+from .utils import (MAX_RUNNING_NODES_COUNT,
+                    ceil_divide)
 
 heartbeats = strategies.floats(2, 4)
 delays = strategies.floats(0, 2)
@@ -13,8 +13,8 @@ cluster_urls = strategies.builds(URL.build,
                                  scheme=strategies.just('http'),
                                  host=hosts,
                                  port=ports)
-cluster_urls_lists = strategies.lists(cluster_urls,
-                                      min_size=1,
-                                      max_size=(multiprocessing.cpu_count()
-                                                // 2) - 1,
-                                      unique_by=node_url_to_id)
+cluster_urls_lists = strategies.lists(
+        cluster_urls,
+        min_size=1,
+        max_size=ceil_divide(MAX_RUNNING_NODES_COUNT, 2),
+        unique_by=node_url_to_id)

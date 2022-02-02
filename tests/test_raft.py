@@ -29,8 +29,7 @@ from consensual.raft import (ClusterId,
                              Role,
                              Term)
 from . import strategies
-
-MAX_RUNNING_NODES_COUNT = multiprocessing.cpu_count() - 1
+from .utils import MAX_RUNNING_NODES_COUNT
 
 
 class RunningClusterState:
