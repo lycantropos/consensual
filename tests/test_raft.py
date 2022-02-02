@@ -17,7 +17,6 @@ from typing import (Iterator,
 import requests
 from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
-                                 consumes,
                                  invariant,
                                  rule)
 from reprit.base import generate_repr
@@ -30,15 +29,17 @@ from consensual.raft import (ClusterId,
                              Role,
                              Term)
 from . import strategies
-from .utils import MAX_RUNNING_NODES_COUNT
+from .utils import (MAX_RUNNING_NODES_COUNT,
+                    equivalence)
 
 
 class RunningClusterState:
     def __init__(self,
                  _id: ClusterId,
                  *,
-                 heartbeat: float) -> None:
-        self.heartbeat, self._id = heartbeat, _id
+                 heartbeat: float,
+                 nodes_ids: List[NodeId]) -> None:
+        self.heartbeat, self._id, self.nodes_ids = heartbeat, _id, nodes_ids
 
     __repr__ = generate_repr(__init__)
 
@@ -86,29 +87,30 @@ class RunningNode:
 
     __repr__ = generate_repr(__init__)
 
-    def add(self, node: 'RunningNode') -> None:
-        assert requests.post(self._url_string,
-                             json=[str(node.url)]).ok
+    def add(self, *nodes: 'RunningNode') -> Optional[str]:
+        response = requests.post(self._url_string,
+                                 json=[str(node.url) for node in nodes])
+        response.raise_for_status()
+        return response.json()['error']
 
     def initialize(self) -> None:
         assert requests.post(self._url_string).ok
 
-    def delete(self) -> None:
+    def delete(self) -> Optional[str]:
         response = requests.delete(self._url_string)
-        assert response.ok
-        error = response.json()['error']
-        assert error is None, error
-
-    def load_state(self) -> Tuple[RunningClusterState, RunningNodeState]:
-        return self.load_cluster_state(), self.load_node_state()
+        response.raise_for_status()
+        return response.json()['error']
 
     def load_cluster_state(self) -> RunningClusterState:
         response = requests.get(str(self.url.with_path('/cluster')))
         response.raise_for_status()
         raw_state = response.json()
-        raw_id, heartbeat = raw_state['id'], raw_state['heartbeat']
+        raw_id, heartbeat, nodes_ids = (
+            raw_state['id'], raw_state['heartbeat'], raw_state['nodes_ids'],
+        )
         return RunningClusterState(ClusterId.from_json(raw_id),
-                                   heartbeat=heartbeat)
+                                   heartbeat=heartbeat,
+                                   nodes_ids=nodes_ids)
 
     def load_node_state(self) -> RunningNodeState:
         response = requests.get(str(self.url.with_path('/node')))
@@ -174,18 +176,39 @@ class Cluster(RuleBasedStateMachine):
         super().__init__()
         self._executor = ThreadPoolExecutor()
         self._nodes: List[RunningNode] = []
-        self._states: List[Tuple[RunningClusterState, RunningNodeState]] = []
+        self._cluster_states: List[RunningClusterState] = []
+        self._nodes_states: List[RunningNodeState] = []
         self._urls: Set[URL] = set()
 
     running_nodes = Bundle('running_nodes')
-    initialized_nodes = Bundle('initialized_nodes')
+
+    @rule(source_nodes=running_nodes,
+          target_nodes=running_nodes)
+    def add_nodes(self,
+                  target_nodes: List[RunningNode],
+                  source_nodes: List[RunningNode]) -> List[RunningNode]:
+        source_nodes = source_nodes[:len(target_nodes)]
+        source_nodes_states_before = self.load_nodes_states(source_nodes)
+        target_clusters_states_before = self.load_clusters_states(target_nodes)
+        target_nodes_states_before = self.load_nodes_states(target_nodes)
+        errors = list(self._executor.map(RunningNode.add, target_nodes,
+                                         source_nodes))
+        assert all(equivalence(error is None,
+                               target_node_state.leader_node_id is not None
+                               and (source_node_state.id
+                                    not in target_cluster_state.nodes_ids))
+                   for (target_cluster_state, target_node_state,
+                        source_node_state, error)
+                   in zip(target_clusters_states_before,
+                          target_nodes_states_before,
+                          source_nodes_states_before, errors))
 
     @rule(target=running_nodes,
           heartbeat=strategies.heartbeats,
           urls=strategies.cluster_urls_lists)
-    def init_nodes(self,
-                   heartbeat: float,
-                   urls: List[URL]) -> List[RunningNode]:
+    def create_nodes(self,
+                     heartbeat: float,
+                     urls: List[URL]) -> List[RunningNode]:
         if len(self._urls) == MAX_RUNNING_NODES_COUNT:
             return []
         assert len(self._urls) < MAX_RUNNING_NODES_COUNT
@@ -205,32 +228,19 @@ class Cluster(RuleBasedStateMachine):
                 break
         return new_nodes
 
-    @rule(target=initialized_nodes,
-          initialized_nodes=initialized_nodes,
-          nodes=consumes(running_nodes))
-    def add_nodes(self,
-                  initialized_nodes: List[RunningNode],
-                  nodes: List[RunningNode]) -> List[RunningNode]:
-        nodes = nodes[:len(initialized_nodes)]
-        _exhaust(self._executor.map(RunningNode.add, initialized_nodes, nodes))
-        states = self._load_states(nodes)
-        while any(node_state.leader_node_id is None
-                  for _, node_state in states):
-            time.sleep(1)
-            states = self._load_states(nodes)
-        return nodes
-
-    @rule(target=initialized_nodes,
-          nodes=consumes(running_nodes))
-    def initialize_nodes(self, nodes: List[RunningNode]) -> List[RunningNode]:
+    @rule(nodes=running_nodes)
+    def initialize_nodes(self, nodes: List[RunningNode]) -> None:
         _exhaust(self._executor.map(RunningNode.initialize, nodes))
-        return nodes
+        clusters_states_after = self.load_clusters_states(nodes)
+        assert all(cluster_state.id for cluster_state in clusters_states_after)
 
-    @rule(target=running_nodes,
-          nodes=consumes(initialized_nodes))
-    def delete_nodes(self, nodes: List[RunningNode]) -> List[RunningNode]:
-        _exhaust(self._executor.map(RunningNode.delete, nodes))
-        return nodes
+    @rule(nodes=running_nodes)
+    def delete_nodes(self, nodes: List[RunningNode]) -> None:
+        nodes_states_before = self.load_nodes_states(nodes)
+        errors = list(self._executor.map(RunningNode.delete, nodes))
+        assert all(equivalence(error is None,
+                               node_state.leader_node_id is not None)
+                   for node_state, error in zip(nodes_states_before, errors))
 
     @rule(delay=strategies.delays)
     def wait(self, delay: float) -> None:
@@ -238,13 +248,13 @@ class Cluster(RuleBasedStateMachine):
 
     @invariant()
     def term_monotonicity(self) -> None:
-        old_states = self._states
+        old_nodes_states = self._nodes_states
         self.update_states()
-        new_states = self._states
+        new_nodes_states = self._nodes_states
         old_terms = {node_state.id: node_state.term
-                     for _, node_state in old_states}
+                     for node_state in old_nodes_states}
         new_terms = {node_state.id: node_state.term
-                     for _, node_state in new_states}
+                     for node_state in new_nodes_states}
         assert all(old_terms[node_id] <= new_term
                    for node_id, new_term in new_terms.items())
 
@@ -252,7 +262,8 @@ class Cluster(RuleBasedStateMachine):
     def election_safety(self) -> None:
         self.update_states()
         clusters_leaders_counts = defaultdict(Counter)
-        for cluster_state, node_state in self._states:
+        for cluster_state, node_state in zip(self._cluster_states,
+                                             self._nodes_states):
             clusters_leaders_counts[cluster_state.id][node_state.term] += (
                     node_state.role is Role.LEADER
             )
@@ -266,11 +277,16 @@ class Cluster(RuleBasedStateMachine):
         self._executor.shutdown()
 
     def update_states(self) -> None:
-        self._states = self._load_states(self._nodes)
+        self._cluster_states = self.load_clusters_states(self._nodes)
+        self._nodes_states = self.load_nodes_states(self._nodes)
 
-    def _load_states(self, nodes: List[RunningNode]
-                     ) -> List[Tuple[RunningClusterState, RunningNodeState]]:
-        return list(self._executor.map(RunningNode.load_state, nodes))
+    def load_clusters_states(self, nodes: List[RunningNode]
+                             ) -> List[RunningClusterState]:
+        return list(self._executor.map(RunningNode.load_cluster_state, nodes))
+
+    def load_nodes_states(self, nodes: List[RunningNode]
+                          ) -> List[RunningNodeState]:
+        return list(self._executor.map(RunningNode.load_node_state, nodes))
 
 
 def _exhaust(iterator: Iterator) -> None:
