@@ -986,8 +986,8 @@ class Node:
         self._lead()
 
     def _lead(self) -> None:
-        self.logger.info(
-                f'{self._state.id} is leader of term {self._state.term}')
+        self.logger.info(f'{self._state.id} is leader '
+                         f'of term {self._state.term}')
         self._state.leader_node_id = self._state.id
         self._state.role = Role.LEADER
         for node_id in self._cluster_state.nodes_ids:
