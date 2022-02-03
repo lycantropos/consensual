@@ -85,9 +85,7 @@ class RunningNode:
         self.heartbeat, self.url = heartbeat, url
         self._url_string = str(url)
         assert not is_url_reachable(self.url)
-        self._process = multiprocessing.Process(target=_run_node,
-                                                args=(url, heartbeat))
-        self._process.start()
+        self._process: Optional[multiprocessing.Process] = None
         self._session = Session()
 
     __repr__ = generate_repr(__init__)
@@ -140,8 +138,15 @@ class RunningNode:
                                 supported_node_id=supported_node_id,
                                 term=term)
 
+    def start(self) -> None:
+        self._process = multiprocessing.Process(
+                target=_run_node,
+                args=(self.url, self.heartbeat))
+        self._process.start()
+
     def stop(self) -> None:
         self._session.close()
+        assert self._process is not None
         while self._process.is_alive():
             self._process.kill()
             time.sleep(0.5)
@@ -238,11 +243,12 @@ class Cluster(RuleBasedStateMachine):
         assert len(self._urls) < MAX_RUNNING_NODES_COUNT
         max_new_nodes_count = MAX_RUNNING_NODES_COUNT - len(self._urls)
         new_urls = list(set(urls) - self._urls)[:max_new_nodes_count]
-        new_nodes = list(self._executor.map(partial(RunningNode,
-                                                    heartbeat=heartbeat),
-                                            new_urls))
+        nodes = list(self._executor.map(partial(RunningNode,
+                                                heartbeat=heartbeat),
+                                        new_urls))
+        _exhaust(self._executor.map(RunningNode.start, nodes))
         self._urls.update(new_urls)
-        self._nodes.extend(new_nodes)
+        self._nodes.extend(nodes)
         for _ in range(5):
             try:
                 self.update_states()
@@ -250,7 +256,7 @@ class Cluster(RuleBasedStateMachine):
                 time.sleep(1)
             else:
                 break
-        return new_nodes
+        return nodes
 
     @rule(nodes=running_nodes)
     def initialize_nodes(self, nodes: List[RunningNode]) -> None:
