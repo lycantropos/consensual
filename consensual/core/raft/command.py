@@ -21,6 +21,12 @@ class Command(Generic[_T]):
 
     __repr__ = generate_repr(__new__)
 
+    def __eq__(self, other: Any) -> Any:
+        return ((self.action == other.action
+                 and self.parameters == other.parameters)
+                if isinstance(other, Command)
+                else NotImplemented)
+
     @property
     def action(self) -> str:
         return self._action
