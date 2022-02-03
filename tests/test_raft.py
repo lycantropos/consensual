@@ -39,8 +39,11 @@ class RunningClusterState:
                  _id: ClusterId,
                  *,
                  heartbeat: float,
-                 nodes_ids: List[NodeId]) -> None:
-        self.heartbeat, self._id, self.nodes_ids = heartbeat, _id, nodes_ids
+                 nodes_ids: List[NodeId],
+                 stable: bool) -> None:
+        self.heartbeat, self._id, self.nodes_ids, self.stable = (
+            heartbeat, _id, nodes_ids, stable
+        )
 
     __repr__ = generate_repr(__init__)
 
@@ -107,12 +110,14 @@ class RunningNode:
         response = self._get(str(self.url.with_path('/cluster')))
         response.raise_for_status()
         raw_state = response.json()
-        raw_id, heartbeat, nodes_ids = (
+        raw_id, heartbeat, nodes_ids, stable = (
             raw_state['id'], raw_state['heartbeat'], raw_state['nodes_ids'],
+            raw_state['stable'],
         )
         return RunningClusterState(ClusterId.from_json(raw_id),
                                    heartbeat=heartbeat,
-                                   nodes_ids=nodes_ids)
+                                   nodes_ids=nodes_ids,
+                                   stable=stable)
 
     def load_node_state(self) -> RunningNodeState:
         response = self._get(str(self.url.with_path('/node')))
