@@ -558,6 +558,7 @@ class Node:
             'id': self._cluster_state.id.as_json(),
             'heartbeat': self._cluster_state.heartbeat,
             'nodes_ids': list(self._cluster_state.nodes_ids),
+            'stable': self._cluster_state.stable,
         }
         return web.json_response(cluster_state_json)
 
