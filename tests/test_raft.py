@@ -16,6 +16,7 @@ from typing import (Iterator,
 import requests
 from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
+                                 consumes,
                                  invariant,
                                  rule)
 from reprit.base import generate_repr
@@ -89,6 +90,14 @@ class RunningNode:
         self._session = Session()
 
     __repr__ = generate_repr(__init__)
+
+    def __eq__(self, other: 'RunningNode') -> bool:
+        return (self.url == other.url and self.heartbeat == other.heartbeat
+                if isinstance(other, RunningNode)
+                else NotImplemented)
+
+    def __hash__(self) -> int:
+        return hash((self.url, self.heartbeat))
 
     def add(self, *nodes: 'RunningNode') -> Optional[str]:
         response = requests.post(self._url_string,
@@ -209,6 +218,7 @@ class Cluster(RuleBasedStateMachine):
         self._urls: Set[URL] = set()
 
     running_nodes = Bundle('running_nodes')
+    shutdown_nodes = Bundle('shutdown_nodes')
 
     @rule(source_nodes=running_nodes,
           target_nodes=running_nodes)
@@ -274,6 +284,23 @@ class Cluster(RuleBasedStateMachine):
                                and node_state.leader_node_id is not None)
                    for cluster_state, node_state, error
                    in zip(clusters_states_before, nodes_states_before, errors))
+
+    @rule(target=running_nodes,
+          nodes=consumes(shutdown_nodes))
+    def restart_nodes(self, nodes: List[RunningNode]) -> List[RunningNode]:
+        _exhaust(self._executor.map(RunningNode.start, nodes))
+        self._nodes += nodes
+        return nodes
+
+    @rule(target=shutdown_nodes,
+          nodes=consumes(running_nodes))
+    def shutdown_nodes(self, nodes: List[RunningNode]) -> List[RunningNode]:
+        _exhaust(self._executor.map(RunningNode.stop, nodes))
+        shutdown_nodes = frozenset(nodes)
+        self._nodes = [node
+                       for node in self._nodes
+                       if node not in shutdown_nodes]
+        return nodes
 
     @rule(delay=strategies.delays)
     def wait(self, delay: float) -> None:
