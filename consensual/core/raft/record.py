@@ -21,6 +21,11 @@ class Record:
 
     __repr__ = generate_repr(__new__)
 
+    def __eq__(self, other: Any) -> Any:
+        return (self.term == other.term and self.command == other.command
+                if isinstance(other, Record)
+                else NotImplemented)
+
     @property
     def command(self) -> Command:
         return self._command
