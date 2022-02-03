@@ -148,7 +148,7 @@ class RunningNode:
         self._session.close()
         assert self._process is not None
         while self._process.is_alive():
-            self._process.kill()
+            self._process.terminate()
             time.sleep(0.5)
         assert not is_url_reachable(self.url)
 
