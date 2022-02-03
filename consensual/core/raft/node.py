@@ -358,12 +358,12 @@ class VoteCall:
 
 
 class VoteStatus(enum.IntEnum):
-    CONFLICTS = 0
-    IGNORES = 1
-    OPPOSES = 2
-    REJECTS = 3
-    SUPPORTS = 4
-    UNAVAILABLE = 5
+    CONFLICTS = enum.auto()
+    IGNORES = enum.auto()
+    OPPOSES = enum.auto()
+    REJECTS = enum.auto()
+    SUPPORTS = enum.auto()
+    UNAVAILABLE = enum.auto()
 
 
 class VoteReply:
