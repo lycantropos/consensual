@@ -357,18 +357,27 @@ class VoteCall:
                 'term': self.term}
 
 
+class VoteStatus(enum.IntEnum):
+    CONFLICTS = 0
+    IGNORES = 1
+    OPPOSES = 2
+    REJECTS = 3
+    SUPPORTS = 4
+    UNAVAILABLE = 5
+
+
 class VoteReply:
-    __slots__ = '_cluster_id', '_node_id', '_supports', '_term'
+    __slots__ = '_cluster_id', '_node_id', '_status', '_term'
 
     def __new__(cls,
                 *,
                 cluster_id: ClusterId,
                 node_id: NodeId,
-                supports: bool,
+                status: VoteStatus,
                 term: Term) -> 'VoteReply':
         self = super().__new__(cls)
-        self._cluster_id, self._node_id, self._supports, self._term = (
-            cluster_id, node_id, supports, term,
+        self._cluster_id, self._node_id, self._status, self._term = (
+            cluster_id, node_id, status, term,
         )
         return self
 
@@ -383,8 +392,8 @@ class VoteReply:
         return self._node_id
 
     @property
-    def supports(self) -> bool:
-        return self._supports
+    def status(self) -> VoteStatus:
+        return self._status
 
     @property
     def term(self) -> Term:
@@ -395,17 +404,17 @@ class VoteReply:
                   *,
                   cluster_id: RawClusterId,
                   node_id: NodeId,
-                  supports: bool,
+                  status: int,
                   term: Term) -> 'VoteReply':
         return cls(cluster_id=ClusterId.from_json(cluster_id),
                    node_id=node_id,
-                   supports=supports,
+                   status=VoteStatus(status),
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
         return {'cluster_id': self.cluster_id.as_json(),
                 'node_id': self.node_id,
-                'supports': self.supports,
+                'status': int(self.status),
                 'term': self.term}
 
 
@@ -645,7 +654,7 @@ class Node:
         except (ClientError, OSError):
             return VoteReply(cluster_id=ClusterId(),
                              node_id=node_id,
-                             supports=False,
+                             status=VoteStatus.UNAVAILABLE,
                              term=self._state.term)
         else:
             return VoteReply.from_json(**raw_reply)
@@ -780,16 +789,16 @@ class Node:
                               f'because it has conflicting cluster id')
             return VoteReply(cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             supports=False)
+                             status=VoteStatus.CONFLICTS,
+                             term=self._state.term)
         elif call.node_id not in self._cluster_state.nodes_ids:
             self.logger.debug(f'{self._state.id} skips voting '
                               f'for {call.node_id} '
                               f'because it is not in cluster state')
             return VoteReply(cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             supports=False)
+                             status=VoteStatus.REJECTS,
+                             term=self._state.term)
         elif (self._state.leader_node_id is not None
               and (self._to_time() - self._last_heartbeat_time
                    < self._cluster_state.heartbeat)):
@@ -799,8 +808,8 @@ class Node:
                     f'can be alive')
             return VoteReply(cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             supports=False)
+                             status=VoteStatus.IGNORES,
+                             term=self._state.term)
         if call.term > self._state.term:
             update_state_term(self._state, call.term)
             self._state.role = Role.FOLLOWER
@@ -812,34 +821,38 @@ class Node:
             self._state.supported_node_id = call.node_id
             return VoteReply(cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             supports=True)
+                             status=VoteStatus.SUPPORTS,
+                             term=self._state.term)
         else:
             return VoteReply(cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             supports=False)
+                             status=VoteStatus.OPPOSES,
+                             term=self._state.term)
 
     async def _process_vote_reply(self, reply: VoteReply) -> None:
         self.logger.debug(f'{self._state.id} processes {reply}')
         if self._state.role is not Role.CANDIDATE:
             pass
-        elif not self._cluster_state.id.agrees_with(reply.cluster_id):
+        elif (reply.status is VoteStatus.UNAVAILABLE
+              or reply.status is VoteStatus.CONFLICTS):
             pass
-        elif (not self._cluster_state.stable
-              and self._cluster_state.new.id == reply.cluster_id
-              and self._state.id not in self._cluster_state.new.nodes_ids):
-            assert not reply.supports
+        elif reply.status is VoteStatus.REJECTS:
+            assert (not self._cluster_state.stable
+                    and self._cluster_state.new.id == reply.cluster_id
+                    and (self._state.id
+                         not in self._cluster_state.new.nodes_ids))
             self._state.rejectors_nodes_ids.add(reply.node_id)
             if self._cluster_state.new.has_majority(
                     self._state.rejectors_nodes_ids):
                 self._delete()
-        elif reply.term == self._state.term and reply.supports:
+        elif (reply.term == self._state.term
+              and reply.status is VoteStatus.SUPPORTS):
             self._state.supporters_nodes_ids.add(reply.node_id)
             if self._cluster_state.has_majority(
                     self._state.supporters_nodes_ids):
                 self._lead()
         elif reply.term > self._state.term:
+            assert reply.status is VoteStatus.OPPOSES
             update_state_term(self._state, reply.term)
             self._state.role = Role.FOLLOWER
             self._cancel_election_timer()
