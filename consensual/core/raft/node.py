@@ -602,7 +602,7 @@ class Node:
             reply = await self._process_update_call(call)
             return web.json_response(reply.as_json())
         else:
-            self._initialize()
+            self._solo()
             return web.HTTPOk()
 
     async def _handle_record(self, request: web.Request) -> web.Response:
@@ -978,15 +978,6 @@ class Node:
         self._state.role = Role.FOLLOWER
         self._cancel_election_timer()
 
-    def _initialize(self) -> None:
-        self.logger.debug(f'{self._state.id} gets initialized')
-        self._update_cluster_state(StableClusterState(
-                generate_cluster_id(),
-                heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._state.id: self.url},
-        ))
-        self._lead()
-
     def _lead(self) -> None:
         self.logger.info(f'{self._state.id} is leader '
                          f'of term {self._state.term}')
@@ -1020,6 +1011,15 @@ class Node:
     def _restart_sync_timer(self) -> None:
         self._cancel_sync_timer()
         self._start_sync_timer()
+
+    def _solo(self) -> None:
+        self.logger.debug(f'{self._state.id} solos')
+        self._update_cluster_state(StableClusterState(
+                generate_cluster_id(),
+                heartbeat=self._cluster_state.heartbeat,
+                nodes_urls={self._state.id: self.url},
+        ))
+        self._lead()
 
     def _start_cluster_state_update(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._state.id} starts cluster state update')
