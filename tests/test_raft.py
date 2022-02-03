@@ -217,7 +217,8 @@ class Cluster(RuleBasedStateMachine):
         errors = list(self._executor.map(RunningNode.add, target_nodes,
                                          source_nodes))
         assert all(equivalence(error is None,
-                               target_node_state.leader_node_id is not None
+                               target_cluster_state.stable
+                               and target_node_state.leader_node_id is not None
                                and (source_node_state.id
                                     not in target_cluster_state.nodes_ids))
                    for (target_cluster_state, target_node_state,
@@ -259,11 +260,14 @@ class Cluster(RuleBasedStateMachine):
 
     @rule(nodes=running_nodes)
     def delete_nodes(self, nodes: List[RunningNode]) -> None:
+        clusters_states_before = self.load_clusters_states(nodes)
         nodes_states_before = self.load_nodes_states(nodes)
         errors = list(self._executor.map(RunningNode.delete, nodes))
         assert all(equivalence(error is None,
-                               node_state.leader_node_id is not None)
-                   for node_state, error in zip(nodes_states_before, errors))
+                               cluster_state.stable
+                               and node_state.leader_node_id is not None)
+                   for cluster_state, node_state, error
+                   in zip(clusters_states_before, nodes_states_before, errors))
 
     @rule(delay=strategies.delays)
     def wait(self, delay: float) -> None:
