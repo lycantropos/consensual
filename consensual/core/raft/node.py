@@ -367,25 +367,18 @@ class VoteStatus(enum.IntEnum):
 
 
 class VoteReply:
-    __slots__ = '_cluster_id', '_node_id', '_status', '_term'
+    __slots__ = '_node_id', '_status', '_term'
 
     def __new__(cls,
                 *,
-                cluster_id: ClusterId,
                 node_id: NodeId,
                 status: VoteStatus,
                 term: Term) -> 'VoteReply':
         self = super().__new__(cls)
-        self._cluster_id, self._node_id, self._status, self._term = (
-            cluster_id, node_id, status, term,
-        )
+        self._node_id, self._status, self._term = node_id, status, term
         return self
 
     __repr__ = generate_repr(__new__)
-
-    @property
-    def cluster_id(self) -> ClusterId:
-        return self._cluster_id
 
     @property
     def node_id(self) -> NodeId:
@@ -402,18 +395,15 @@ class VoteReply:
     @classmethod
     def from_json(cls,
                   *,
-                  cluster_id: RawClusterId,
                   node_id: NodeId,
                   status: int,
                   term: Term) -> 'VoteReply':
-        return cls(cluster_id=ClusterId.from_json(cluster_id),
-                   node_id=node_id,
+        return cls(node_id=node_id,
                    status=VoteStatus(status),
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'cluster_id': self.cluster_id.as_json(),
-                'node_id': self.node_id,
+        return {'node_id': self.node_id,
                 'status': int(self.status),
                 'term': self.term}
 
@@ -652,8 +642,7 @@ class Node:
         try:
             raw_reply = await self._send_call(node_id, CallPath.VOTE, call)
         except (ClientError, OSError):
-            return VoteReply(cluster_id=ClusterId(),
-                             node_id=node_id,
+            return VoteReply(node_id=node_id,
                              status=VoteStatus.UNAVAILABLE,
                              term=self._state.term)
         else:
@@ -787,16 +776,14 @@ class Node:
             self.logger.debug(f'{self._state.id} skips voting '
                               f'for {call.node_id} '
                               f'because it has conflicting cluster id')
-            return VoteReply(cluster_id=self._cluster_state.id,
-                             node_id=self._state.id,
+            return VoteReply(node_id=self._state.id,
                              status=VoteStatus.CONFLICTS,
                              term=self._state.term)
         elif call.node_id not in self._cluster_state.nodes_ids:
             self.logger.debug(f'{self._state.id} skips voting '
                               f'for {call.node_id} '
                               f'because it is not in cluster state')
-            return VoteReply(cluster_id=self._cluster_state.id,
-                             node_id=self._state.id,
+            return VoteReply(node_id=self._state.id,
                              status=VoteStatus.REJECTS,
                              term=self._state.term)
         elif (self._state.leader_node_id is not None
@@ -806,8 +793,7 @@ class Node:
                     f'{self._state.id} skips voting for {call.node_id} '
                     f'because leader {self._state.leader_node_id} '
                     f'can be alive')
-            return VoteReply(cluster_id=self._cluster_state.id,
-                             node_id=self._state.id,
+            return VoteReply(node_id=self._state.id,
                              status=VoteStatus.IGNORES,
                              term=self._state.term)
         if call.term > self._state.term:
@@ -819,13 +805,11 @@ class Node:
                 and (self._state.supported_node_id is None
                      or self._state.supported_node_id == call.node_id)):
             self._state.supported_node_id = call.node_id
-            return VoteReply(cluster_id=self._cluster_state.id,
-                             node_id=self._state.id,
+            return VoteReply(node_id=self._state.id,
                              status=VoteStatus.SUPPORTS,
                              term=self._state.term)
         else:
-            return VoteReply(cluster_id=self._cluster_state.id,
-                             node_id=self._state.id,
+            return VoteReply(node_id=self._state.id,
                              status=VoteStatus.OPPOSES,
                              term=self._state.term)
 
@@ -833,12 +817,12 @@ class Node:
         self.logger.debug(f'{self._state.id} processes {reply}')
         if self._state.role is not Role.CANDIDATE:
             pass
-        elif (reply.status is VoteStatus.UNAVAILABLE
-              or reply.status is VoteStatus.CONFLICTS):
+        elif (reply.status is VoteStatus.CONFLICTS
+              or reply.status is VoteStatus.IGNORES
+              or reply.status is VoteStatus.UNAVAILABLE):
             pass
         elif reply.status is VoteStatus.REJECTS:
             assert (not self._cluster_state.stable
-                    and self._cluster_state.new.id == reply.cluster_id
                     and (self._state.id
                          not in self._cluster_state.new.nodes_ids))
             self._state.rejectors_nodes_ids.add(reply.node_id)
