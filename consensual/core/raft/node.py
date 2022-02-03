@@ -656,7 +656,8 @@ class Node:
             return LogReply(error=f'{self._state.id} has no leader')
         elif self._state.role is Role.LEADER:
             append_record(self._state,
-                          Record(command=call.command,
+                          Record(cluster_id=self._cluster_state.id,
+                                 command=call.command,
                                  term=self._state.term))
             await self._sync_followers_once()
             assert self._state.accepted_lengths[self._state.id] == len(
@@ -764,7 +765,8 @@ class Node:
         command = Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
                           parameters=next_cluster_state.as_json())
         append_record(self._state,
-                      Record(command=command,
+                      Record(cluster_id=self._cluster_state.id,
+                             command=command,
                              term=self._state.term))
         self._update_cluster_state(next_cluster_state)
         await self._sync_followers_once()
@@ -1028,7 +1030,8 @@ class Node:
             command = Command(action=END_CLUSTER_STATE_UPDATE_ACTION,
                               parameters=cluster_state.new.as_json())
             append_record(self._state,
-                          Record(command=command,
+                          Record(cluster_id=self._cluster_state.id,
+                                 command=command,
                                  term=self._state.term))
             self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
