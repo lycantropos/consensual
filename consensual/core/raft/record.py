@@ -3,8 +3,8 @@ from typing import (Any,
 
 from reprit.base import generate_repr
 
-from .cluster_state import (ClusterId,
-                            RawClusterId)
+from .cluster_id import (ClusterId,
+                         RawClusterId)
 from .command import Command
 from .hints import Term
 

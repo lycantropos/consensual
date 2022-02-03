@@ -23,20 +23,20 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
+from .cluster_id import (ClusterId,
+                         RawClusterId)
 from .cluster_state import (AnyClusterState,
-                            ClusterId,
-                            RawClusterId,
                             StableClusterState,
                             TransitionalClusterState)
 from .command import Command
 from .communication import (Communication,
                             update_communication_registry)
-from .hints import (Processor,
+from .hints import (NodeId,
+                    Processor,
                     Protocol,
                     Term,
                     Time)
-from .node_state import (NodeId,
-                         NodeState,
+from .node_state import (NodeState,
                          Role,
                          append_record,
                          append_records,
