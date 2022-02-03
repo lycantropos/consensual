@@ -218,6 +218,44 @@ class Cluster(RuleBasedStateMachine):
         self._nodes_states: List[RunningNodeState] = []
         self._urls: Set[URL] = set()
 
+    @invariant()
+    def log_matching(self) -> None:
+        old_nodes_states = self._nodes_states
+        self.update_states()
+        new_nodes_states = self._nodes_states
+        assert all(implication(old_record.term == new_record.term,
+                               old_record == new_record.term)
+                   for old_state, new_state in zip(old_nodes_states,
+                                                   new_nodes_states)
+                   for old_record, new_record in zip(old_state.log,
+                                                     new_state.log))
+
+    @invariant()
+    def election_safety(self) -> None:
+        self.update_states()
+        clusters_leaders_counts = defaultdict(Counter)
+        for cluster_state, node_state in zip(self._cluster_states,
+                                             self._nodes_states):
+            clusters_leaders_counts[cluster_state.id][node_state.term] += (
+                    node_state.role is Role.LEADER
+            )
+        assert all(
+                leaders_count <= 1
+                for cluster_leaders_counts in clusters_leaders_counts.values()
+                for leaders_count in cluster_leaders_counts.values())
+
+    @invariant()
+    def term_monotonicity(self) -> None:
+        old_nodes_states = self._nodes_states
+        self.update_states()
+        new_nodes_states = self._nodes_states
+        old_terms = {node_state.id: node_state.term
+                     for node_state in old_nodes_states}
+        new_terms = {node_state.id: node_state.term
+                     for node_state in new_nodes_states}
+        assert all(old_terms[node_id] <= new_term
+                   for node_id, new_term in new_terms.items())
+
     running_nodes = Bundle('running_nodes')
     shutdown_nodes = Bundle('shutdown_nodes')
 
@@ -306,44 +344,6 @@ class Cluster(RuleBasedStateMachine):
     @rule(delay=strategies.delays)
     def wait(self, delay: float) -> None:
         time.sleep(delay)
-
-    @invariant()
-    def term_monotonicity(self) -> None:
-        old_nodes_states = self._nodes_states
-        self.update_states()
-        new_nodes_states = self._nodes_states
-        old_terms = {node_state.id: node_state.term
-                     for node_state in old_nodes_states}
-        new_terms = {node_state.id: node_state.term
-                     for node_state in new_nodes_states}
-        assert all(old_terms[node_id] <= new_term
-                   for node_id, new_term in new_terms.items())
-
-    @invariant()
-    def log_matching(self) -> None:
-        old_nodes_states = self._nodes_states
-        self.update_states()
-        new_nodes_states = self._nodes_states
-        assert all(implication(old_record.term == new_record.term,
-                               old_record == new_record.term)
-                   for old_state, new_state in zip(old_nodes_states,
-                                                   new_nodes_states)
-                   for old_record, new_record in zip(old_state.log,
-                                                     new_state.log))
-
-    @invariant()
-    def election_safety(self) -> None:
-        self.update_states()
-        clusters_leaders_counts = defaultdict(Counter)
-        for cluster_state, node_state in zip(self._cluster_states,
-                                             self._nodes_states):
-            clusters_leaders_counts[cluster_state.id][node_state.term] += (
-                    node_state.role is Role.LEADER
-            )
-        assert all(
-                leaders_count <= 1
-                for cluster_leaders_counts in clusters_leaders_counts.values()
-                for leaders_count in cluster_leaders_counts.values())
 
     def teardown(self) -> None:
         _exhaust(self._executor.map(RunningNode.stop, self._nodes))
