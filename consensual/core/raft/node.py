@@ -531,23 +531,19 @@ class Node:
                     ('{id} initializes removal of {nodes_ids}'
                      .format(id=self._state.id,
                              nodes_ids=', '.join(nodes_urls_to_delete))))
-            call = UpdateCall(StableClusterState(
-                    generate_cluster_id(),
-                    heartbeat=self._cluster_state.heartbeat,
-                    nodes_urls=subtract_mapping(self._cluster_state.nodes_urls,
-                                                nodes_urls_to_delete)))
-            reply = await self._process_update_call(call)
-            return web.json_response(reply.as_json())
+            rest_nodes_urls = subtract_mapping(self._cluster_state.nodes_urls,
+                                               nodes_urls_to_delete)
         else:
             self.logger.debug(f'{self._state.id} gets removed')
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
             del rest_nodes_urls[self._state.id]
-            call = UpdateCall(
-                    StableClusterState(generate_cluster_id(),
-                                       heartbeat=self._cluster_state.heartbeat,
-                                       nodes_urls=rest_nodes_urls))
-            reply = await self._process_update_call(call)
-            return web.json_response(reply.as_json())
+        call = UpdateCall(
+                StableClusterState(generate_cluster_id(),
+                                   heartbeat=self._cluster_state.heartbeat,
+                                   nodes_urls=rest_nodes_urls)
+        )
+        reply = await self._process_update_call(call)
+        return web.json_response(reply.as_json())
 
     async def _handle_get_cluster(self, request: web.Request) -> web.Response:
         cluster_state_json = {
