@@ -1,7 +1,3 @@
-import logging.config
-import multiprocessing
-import socket
-import sys
 import time
 from collections import (Counter,
                          defaultdict,
@@ -11,203 +7,23 @@ from functools import partial
 from operator import eq
 from typing import (Iterator,
                     List,
-                    Optional,
                     Set)
 
-import requests
 from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
                                  consumes,
                                  invariant,
                                  rule)
-from reprit.base import generate_repr
-from requests import (Response,
-                      Session)
 from yarl import URL
 
-from consensual.raft import (ClusterId,
-                             Node,
-                             NodeId,
-                             Record,
-                             Role,
-                             Term)
+from consensual.raft import Role
 from . import strategies
+from .running_cluster_state import RunningClusterState
+from .running_node import RunningNode
+from .running_node_state import RunningNodeState
 from .utils import (MAX_RUNNING_NODES_COUNT,
                     equivalence,
                     implication)
-
-
-class RunningClusterState:
-    def __init__(self,
-                 _id: ClusterId,
-                 *,
-                 heartbeat: float,
-                 nodes_ids: List[NodeId],
-                 stable: bool) -> None:
-        self.heartbeat, self._id, self.nodes_ids, self.stable = (
-            heartbeat, _id, nodes_ids, stable
-        )
-
-    __repr__ = generate_repr(__init__)
-
-    @property
-    def id(self) -> ClusterId:
-        return self._id
-
-
-class RunningNodeState:
-    def __init__(self,
-                 _id: NodeId,
-                 *,
-                 commit_length: int,
-                 leader_node_id: Optional[NodeId],
-                 log: List[Record],
-                 role: Role,
-                 supported_node_id: Optional[NodeId],
-                 term: Term) -> None:
-        self._id = _id
-        self.commit_length = commit_length
-        self.leader_node_id = leader_node_id
-        self.log = log
-        self.role = role
-        self.supported_node_id = supported_node_id
-        self.term = term
-
-    __repr__ = generate_repr(__init__)
-
-    @property
-    def id(self) -> NodeId:
-        return self._id
-
-
-class RunningNode:
-    def __init__(self,
-                 url: URL,
-                 *,
-                 heartbeat: float) -> None:
-        self.heartbeat, self.url = heartbeat, url
-        self._url_string = str(url)
-        assert not is_url_reachable(self.url)
-        self._process: Optional[multiprocessing.Process] = None
-        self._session = Session()
-
-    __repr__ = generate_repr(__init__)
-
-    def __eq__(self, other: 'RunningNode') -> bool:
-        return (self.url == other.url and self.heartbeat == other.heartbeat
-                if isinstance(other, RunningNode)
-                else NotImplemented)
-
-    def __hash__(self) -> int:
-        return hash((self.url, self.heartbeat))
-
-    def add(self, *nodes: 'RunningNode') -> Optional[str]:
-        response = requests.post(self._url_string,
-                                 json=[str(node.url) for node in nodes])
-        response.raise_for_status()
-        return response.json()['error']
-
-    def initialize(self) -> None:
-        assert requests.post(self._url_string).ok
-
-    def delete(self) -> Optional[str]:
-        response = requests.delete(self._url_string)
-        response.raise_for_status()
-        return response.json()['error']
-
-    def load_cluster_state(self) -> RunningClusterState:
-        response = self._get(str(self.url.with_path('/cluster')))
-        response.raise_for_status()
-        raw_state = response.json()
-        raw_id, heartbeat, nodes_ids, stable = (
-            raw_state['id'], raw_state['heartbeat'], raw_state['nodes_ids'],
-            raw_state['stable'],
-        )
-        return RunningClusterState(ClusterId.from_json(raw_id),
-                                   heartbeat=heartbeat,
-                                   nodes_ids=nodes_ids,
-                                   stable=stable)
-
-    def load_node_state(self) -> RunningNodeState:
-        response = self._get(str(self.url.with_path('/node')))
-        response.raise_for_status()
-        raw_state = response.json()
-        (
-            commit_length, id_, leader_node_id, raw_log, raw_node_role,
-            supported_node_id, term,
-        ) = (
-            raw_state['commit_length'], raw_state['id'],
-            raw_state['leader_node_id'], raw_state['log'], raw_state['role'],
-            raw_state['supported_node_id'], raw_state['term'],
-        )
-        log = [Record.from_json(**raw_record) for raw_record in raw_log]
-        return RunningNodeState(id_,
-                                commit_length=commit_length,
-                                leader_node_id=leader_node_id,
-                                log=log,
-                                role=Role(raw_node_role),
-                                supported_node_id=supported_node_id,
-                                term=term)
-
-    def start(self) -> None:
-        self._process = multiprocessing.Process(
-                target=_run_node,
-                args=(self.url, self.heartbeat))
-        self._process.start()
-
-    def stop(self) -> None:
-        self._session.close()
-        assert self._process is not None
-        while self._process.is_alive():
-            self._process.terminate()
-            time.sleep(0.5)
-        assert not is_url_reachable(self.url)
-
-    def _get(self, endpoint: str) -> Response:
-        last_error = None
-        for _ in range(10):
-            try:
-                response = self._session.get(endpoint)
-            except OSError as error:
-                last_error = error
-                time.sleep(1)
-            else:
-                break
-        else:
-            raise last_error
-        return response
-
-
-def is_url_reachable(url: URL) -> bool:
-    connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    connection.settimeout(2)
-    with connection:
-        try:
-            connection.connect((url.host, url.port))
-        except OSError:
-            return False
-        else:
-            return True
-
-
-def to_logger(name: str,
-              *,
-              version: int = 1) -> logging.Logger:
-    console_formatter = {'format': '[%(levelname)-8s %(name)s] %(msg)s'}
-    formatters = {'console': console_formatter}
-    console_handler_config = {'class': 'logging.StreamHandler',
-                              'level': logging.DEBUG,
-                              'formatter': 'console',
-                              'stream': sys.stdout}
-    handlers = {'console': console_handler_config}
-    loggers = {name: {'level': logging.DEBUG,
-                      'handlers': ('console',)}}
-    config = {'formatters': formatters,
-              'handlers': handlers,
-              'loggers': loggers,
-              'version': version}
-    logging.config.dictConfig(config)
-    return logging.getLogger(name)
 
 
 class Cluster(RuleBasedStateMachine):
@@ -391,14 +207,6 @@ class Cluster(RuleBasedStateMachine):
 def _exhaust(iterator: Iterator) -> None:
     deque(iterator,
           maxlen=0)
-
-
-def _run_node(url: URL,
-              heartbeat: float) -> None:
-    node = Node.from_url(url,
-                         heartbeat=heartbeat,
-                         logger=to_logger(url.authority))
-    return node.run()
 
 
 TestCluster = Cluster.TestCase
