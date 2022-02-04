@@ -171,12 +171,6 @@ class Cluster(RuleBasedStateMachine):
         return parameters
 
     @rule(nodes=running_nodes)
-    def initialize_nodes(self, nodes: List[RunningNode]) -> None:
-        _exhaust(self._executor.map(RunningNode.initialize, nodes))
-        clusters_states_after = self.load_clusters_states(nodes)
-        assert all(cluster_state.id for cluster_state in clusters_states_after)
-
-    @rule(nodes=running_nodes)
     def delete_nodes(self, nodes: List[RunningNode]) -> None:
         clusters_states_before = self.load_clusters_states(nodes)
         nodes_states_before = self.load_nodes_states(nodes)
@@ -186,6 +180,12 @@ class Cluster(RuleBasedStateMachine):
                                and node_state.leader_node_id is not None)
                    for cluster_state, node_state, error
                    in zip(clusters_states_before, nodes_states_before, errors))
+
+    @rule(nodes=running_nodes)
+    def initialize_nodes(self, nodes: List[RunningNode]) -> None:
+        _exhaust(self._executor.map(RunningNode.initialize, nodes))
+        clusters_states_after = self.load_clusters_states(nodes)
+        assert all(cluster_state.id for cluster_state in clusters_states_after)
 
     @rule(nodes=running_nodes,
           parameters=consumes(parameters))
