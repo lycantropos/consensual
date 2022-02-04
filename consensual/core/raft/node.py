@@ -750,11 +750,11 @@ class Node:
                 return UpdateReply(error=format_exception(exception))
             else:
                 return UpdateReply.from_json(**raw_reply)
-        if not self._cluster_state.stable:
+        elif not self._cluster_state.stable:
             return UpdateReply(error='Cluster is currently '
                                      'in transitional state.')
-        if (len(self._cluster_state.nodes_ids) == 1
-                and not call.cluster_state.nodes_ids):
+        elif (len(self._cluster_state.nodes_ids) == 1
+              and not call.cluster_state.nodes_ids):
             self._delete()
             return UpdateReply(error=None)
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
@@ -766,7 +766,7 @@ class Node:
                              command=command,
                              term=self._state.term))
         self._update_cluster_state(next_cluster_state)
-        await self._sync_followers_once()
+        self._restart_sync_timer()
         return UpdateReply(error=None)
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
