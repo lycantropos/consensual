@@ -105,8 +105,8 @@ class Cluster(RuleBasedStateMachine):
         assert all(old_terms[node_id] <= new_term
                    for node_id, new_term in new_terms.items())
 
-    parameters = Bundle('parameters')
     running_nodes = Bundle('running_nodes')
+    running_nodes_with_parameters = Bundle('running_nodes_with_parameters')
     shutdown_nodes = Bundle('shutdown_nodes')
 
     @rule(source_nodes=running_nodes,
@@ -130,6 +130,15 @@ class Cluster(RuleBasedStateMachine):
                    in zip(target_clusters_states_before,
                           target_nodes_states_before,
                           source_nodes_states_before, errors))
+
+    @rule(target=running_nodes_with_parameters,
+          nodes_with_parameters=consumes(running_nodes).flatmap(
+                  strategies.nodes_to_nodes_with_parameters_strategies))
+    def attach_parameters(self,
+                          nodes_with_parameters
+                          : Tuple[List[RunningNode], List[Tuple[str, Any]]]
+                          ) -> Tuple[List[RunningNode], List[Tuple[str, Any]]]:
+        return nodes_with_parameters
 
     def is_not_full(self) -> bool:
         return len(self._urls) < MAX_RUNNING_NODES_COUNT
@@ -164,13 +173,6 @@ class Cluster(RuleBasedStateMachine):
                 break
         return nodes
 
-    @rule(target=parameters,
-          parameters=(running_nodes.flatmap(strategies
-                                            .nodes_to_parameters_strategies)))
-    def create_parameters(self, parameters: List[Tuple[str, Any]]
-                          ) -> List[Tuple[str, Any]]:
-        return parameters
-
     @rule(nodes=running_nodes)
     def delete_nodes(self, nodes: List[RunningNode]) -> None:
         clusters_states_before = self.load_clusters_states(nodes)
@@ -188,11 +190,11 @@ class Cluster(RuleBasedStateMachine):
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
-    @rule(nodes=running_nodes,
-          parameters=consumes(parameters))
+    @rule(nodes_with_parameters=running_nodes_with_parameters)
     def log(self,
-            nodes: List[RunningNode],
-            parameters: List[Tuple[str, Any]]) -> None:
+            nodes_with_parameters: Tuple[List[RunningNode],
+                                         List[Tuple[str, Any]]]) -> None:
+        nodes, parameters = nodes_with_parameters
         nodes_states_before = self.load_nodes_states(nodes)
         errors = list(self._executor.map(RunningNode.log, nodes, parameters))
         assert all(equivalence(error is None,

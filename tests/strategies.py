@@ -14,7 +14,8 @@ from consensual.core.raft.node import node_url_to_id
 from consensual.raft import (Node,
                              Processor)
 from .running_node import RunningNode
-from .utils import MAX_RUNNING_NODES_COUNT
+from .utils import (MAX_RUNNING_NODES_COUNT,
+                    transpose)
 
 heartbeats = strategies.floats(1, 2)
 delays = strategies.floats(2, 4)
@@ -57,15 +58,17 @@ def to_parameters_strategy(path_with_processor: Tuple[str, Processor]
                              processors_parameters[processor])
 
 
-def nodes_to_parameters_strategies(nodes: List[RunningNode]
-                                   ) -> SearchStrategy[List[Tuple[str, Any]]]:
+def nodes_to_nodes_with_parameters_strategies(
+        nodes: List[RunningNode]
+) -> SearchStrategy[Tuple[List[RunningNode], List[Tuple[str, Any]]]]:
     strategies_list = [
-        (strategies.sampled_from([
-            (urllib.parse.quote(path), processor)
-            for path, processor in node.processors.items()
-        ]).flatmap(to_parameters_strategy))
+        strategies.tuples(strategies.just(node),
+                          strategies.sampled_from([
+                              (urllib.parse.quote(path), processor)
+                              for path, processor in node.processors.items()
+                          ]).flatmap(to_parameters_strategy))
         if node.processors
         else strategies.nothing()
         for node in nodes
     ]
-    return strategies.tuples(*strategies_list).map(list)
+    return strategies.tuples(*strategies_list).map(list).map(transpose)
