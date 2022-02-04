@@ -193,7 +193,7 @@ class Cluster(RuleBasedStateMachine):
             nodes: List[RunningNode],
             parameters: List[Tuple[str, Any]]) -> None:
         nodes_states_before = self.load_nodes_states(nodes)
-        errors = list(self._executor.map(RunningNode.log, parameters))
+        errors = list(self._executor.map(RunningNode.log, nodes, parameters))
         assert all(equivalence(error is None,
                                node_state_before.leader_node_id is not None)
                    for node_state_before, error in zip(nodes_states_before,
