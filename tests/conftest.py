@@ -1,5 +1,4 @@
 import os
-from datetime import timedelta
 
 from hypothesis import settings
 
@@ -8,4 +7,4 @@ settings.register_profile('default',
                           max_examples=(settings.default.max_examples // 5
                                         if on_azure_pipelines
                                         else settings.default.max_examples),
-                          deadline=timedelta(minutes=3))
+                          deadline=None)
