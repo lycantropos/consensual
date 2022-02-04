@@ -136,6 +136,10 @@ def update_state_nodes_ids(state: NodeState,
     for removed_node_id in old_nodes_ids - new_nodes_ids:
         del (state.accepted_lengths[removed_node_id],
              state.sent_lengths[removed_node_id])
+    if (state.role is not Role.LEADER
+            and state.leader_node_id is not None
+            and state.leader_node_id not in nodes_ids):
+        state.leader_node_id = None
     added_nodes_ids = new_nodes_ids - old_nodes_ids
     state.accepted_lengths.update({node_id: 0 for node_id in added_nodes_ids})
     state.sent_lengths.update({node_id: 0 for node_id in added_nodes_ids})
