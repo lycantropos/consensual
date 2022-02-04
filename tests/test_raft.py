@@ -4,19 +4,26 @@ from collections import (Counter,
                          deque)
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from itertools import (chain,
+                       repeat)
 from operator import eq
-from typing import (Iterator,
+from typing import (Any,
+                    Dict,
+                    Iterator,
                     List,
-                    Set)
+                    Set,
+                    Tuple)
 
 from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
                                  consumes,
                                  invariant,
+                                 multiple,
                                  rule)
 from yarl import URL
 
-from consensual.raft import Role
+from consensual.raft import (Processor,
+                             Role)
 from . import strategies
 from .running_cluster_state import RunningClusterState
 from .running_node import RunningNode
@@ -98,6 +105,7 @@ class Cluster(RuleBasedStateMachine):
         assert all(old_terms[node_id] <= new_term
                    for node_id, new_term in new_terms.items())
 
+    parameters = Bundle('parameters')
     running_nodes = Bundle('running_nodes')
     shutdown_nodes = Bundle('shutdown_nodes')
 
@@ -124,19 +132,25 @@ class Cluster(RuleBasedStateMachine):
                           source_nodes_states_before, errors))
 
     @rule(target=running_nodes,
+          processors=strategies.processors_dicts_lists,
           heartbeat=strategies.heartbeats,
           urls=strategies.cluster_urls_lists)
     def create_nodes(self,
                      heartbeat: float,
+                     processors: List[Dict[str, Processor]],
                      urls: List[URL]) -> List[RunningNode]:
         if len(self._urls) == MAX_RUNNING_NODES_COUNT:
-            return []
+            return multiple()
         assert len(self._urls) < MAX_RUNNING_NODES_COUNT
         max_new_nodes_count = MAX_RUNNING_NODES_COUNT - len(self._urls)
         new_urls = list(set(urls) - self._urls)[:max_new_nodes_count]
+        extra_processors_count = len(new_urls) - len(processors)
         nodes = list(self._executor.map(partial(RunningNode,
                                                 heartbeat=heartbeat),
-                                        new_urls))
+                                        new_urls,
+                                        chain(processors,
+                                              repeat(None,
+                                                     extra_processors_count))))
         _exhaust(self._executor.map(RunningNode.start, nodes))
         self._urls.update(new_urls)
         self._nodes.extend(nodes)
@@ -149,11 +163,30 @@ class Cluster(RuleBasedStateMachine):
                 break
         return nodes
 
+    @rule(target=parameters,
+          parameters=(running_nodes.flatmap(strategies
+                                            .nodes_to_parameters_strategies)))
+    def create_parameters(self, parameters: List[Tuple[str, Any]]
+                          ) -> List[Tuple[str, Any]]:
+        return parameters
+
     @rule(nodes=running_nodes)
     def initialize_nodes(self, nodes: List[RunningNode]) -> None:
         _exhaust(self._executor.map(RunningNode.initialize, nodes))
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
+
+    @rule(nodes=running_nodes,
+          parameters=consumes(parameters))
+    def log(self,
+            nodes: List[RunningNode],
+            parameters: List[Tuple[str, Any]]) -> None:
+        nodes_states_before = self.load_nodes_states(nodes)
+        errors = list(self._executor.map(RunningNode.log, parameters))
+        assert all(equivalence(error is None,
+                               node_state_before.leader_node_id is not None)
+                   for node_state_before, error in zip(nodes_states_before,
+                                                       errors))
 
     @rule(nodes=running_nodes)
     def delete_nodes(self, nodes: List[RunningNode]) -> None:

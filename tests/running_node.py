@@ -3,8 +3,10 @@ import multiprocessing
 import socket
 import sys
 import time
-from typing import (Dict,
-                    Optional)
+from typing import (Any,
+                    Dict,
+                    Optional,
+                    Tuple)
 
 import requests
 from reprit.base import generate_repr
@@ -53,6 +55,13 @@ class RunningNode:
 
     def initialize(self) -> None:
         assert requests.post(self._url_string).ok
+
+    def log(self, path_with_parameters: Tuple[str, Any]) -> None:
+        path, parameters = path_with_parameters
+        response = requests.post(str(self.url.with_path(path)),
+                                 json=parameters)
+        response.raise_for_status()
+        return response.json()['error']
 
     def delete(self) -> Optional[str]:
         response = requests.delete(self._url_string)
