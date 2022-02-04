@@ -14,7 +14,8 @@ from typing import (Any,
                     Dict,
                     List,
                     Mapping,
-                    Optional)
+                    Optional,
+                    Sequence)
 
 from aiohttp import (ClientError,
                      web,
@@ -192,22 +193,26 @@ class SyncCall:
                 'term': self.term}
 
 
+class SyncStatus(enum.IntEnum):
+    CONFLICT = enum.auto()
+    FAILURE = enum.auto()
+    SUCCESS = enum.auto()
+    UNAVAILABLE = enum.auto()
+
+
 class SyncReply:
-    __slots__ = ('_accepted_length', '_cluster_id', '_node_id', '_successful',
-                 '_term')
+    __slots__ = '_accepted_length', '_node_id', '_status', '_term'
 
     def __new__(cls,
                 *,
                 accepted_length: int,
-                cluster_id: ClusterId,
                 node_id: NodeId,
-                successful: bool,
+                status: SyncStatus,
                 term: Term) -> 'SyncReply':
         self = super().__new__(cls)
-        (
-            self._accepted_length, self._cluster_id, self._node_id,
-            self._successful, self._term
-        ) = accepted_length, cluster_id, node_id, successful, term
+        self._accepted_length, self._node_id, self._status, self._term = (
+            accepted_length, node_id, status, term
+        )
         return self
 
     __repr__ = generate_repr(__new__)
@@ -217,16 +222,12 @@ class SyncReply:
         return self._accepted_length
 
     @property
-    def cluster_id(self) -> ClusterId:
-        return self._cluster_id
-
-    @property
     def node_id(self) -> NodeId:
         return self._node_id
 
     @property
-    def successful(self) -> bool:
-        return self._successful
+    def status(self) -> SyncStatus:
+        return self._status
 
     @property
     def term(self) -> Term:
@@ -236,21 +237,18 @@ class SyncReply:
     def from_json(cls,
                   *,
                   accepted_length: int,
-                  cluster_id: RawClusterId,
                   node_id: NodeId,
-                  successful: bool,
+                  status: int,
                   term: Term) -> 'SyncReply':
         return cls(accepted_length=accepted_length,
-                   cluster_id=ClusterId.from_json(cluster_id),
                    node_id=node_id,
-                   successful=successful,
+                   status=SyncStatus(status),
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
         return {'accepted_length': self.accepted_length,
-                'cluster_id': self.cluster_id.as_json(),
                 'node_id': self.node_id,
-                'successful': self.successful,
+                'status': int(self.status),
                 'term': self.term}
 
 
@@ -626,10 +624,9 @@ class Node:
             raw_reply = await self._send_call(node_id, CallPath.SYNC, call)
         except (ClientError, OSError):
             return SyncReply(accepted_length=0,
-                             cluster_id=ClusterId(),
                              node_id=node_id,
-                             term=self._state.term,
-                             successful=False)
+                             status=SyncStatus.UNAVAILABLE,
+                             term=self._state.term)
         else:
             return SyncReply.from_json(**raw_reply)
 
@@ -676,13 +673,14 @@ class Node:
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._state.id} processes {call}')
-        if (self._cluster_state.id
-                and not self._cluster_state.id.agrees_with(call.cluster_id)):
+        states_agree = (self._cluster_state.id.agrees_with(call.cluster_id)
+                        if self._cluster_state.id
+                        else not self._state.log)
+        if not states_agree:
             return SyncReply(accepted_length=0,
-                             cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             successful=False)
+                             status=SyncStatus.CONFLICT,
+                             term=self._state.term)
         self._last_heartbeat_time = self._to_time()
         self._restart_reelection_timer()
         if call.term > self._state.term:
@@ -702,24 +700,24 @@ class Node:
                                              :call.commit_length])
             return SyncReply(accepted_length=(call.prefix_length
                                               + len(call.suffix)),
-                             cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             successful=True)
+                             status=SyncStatus.SUCCESS,
+                             term=self._state.term)
         else:
             return SyncReply(accepted_length=0,
-                             cluster_id=self._cluster_state.id,
                              node_id=self._state.id,
-                             term=self._state.term,
-                             successful=False)
+                             status=SyncStatus.FAILURE,
+                             term=self._state.term)
 
     async def _process_sync_reply(self, reply: SyncReply) -> None:
         self.logger.debug(f'{self._state.id} processes {reply}')
-        if not self._cluster_state.id.agrees_with(reply.cluster_id):
+        if self._state.role is not Role.LEADER:
             pass
-        elif (reply.term == self._state.term
-              and self._state.role is Role.LEADER):
-            if (reply.successful
+        elif (reply.status is SyncStatus.CONFLICT
+              or reply.status is SyncStatus.UNAVAILABLE):
+            pass
+        elif reply.term == self._state.term:
+            if (reply.status is SyncStatus.SUCCESS
                     and (reply.accepted_length
                          >= self._state.accepted_lengths[reply.node_id])):
                 self._state.accepted_lengths[reply.node_id] = (
@@ -728,6 +726,7 @@ class Node:
                 self._state.sent_lengths[reply.node_id] = reply.accepted_length
                 self._try_commit()
             elif self._state.sent_lengths[reply.node_id] > 0:
+                assert reply.status is SyncStatus.FAILURE
                 self._state.sent_lengths[reply.node_id] = (
                         self._state.sent_lengths[reply.node_id] - 1)
                 await self._sync_follower(reply.node_id)
