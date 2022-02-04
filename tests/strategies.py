@@ -64,6 +64,8 @@ def nodes_to_parameters_strategies(nodes: List[RunningNode]
             (urllib.parse.quote(path), processor)
             for path, processor in node.processors.items()
         ]).flatmap(to_parameters_strategy))
+        if node.processors
+        else strategies.nothing()
         for node in nodes
     ]
     return strategies.tuples(*strategies_list).map(list)
