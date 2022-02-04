@@ -14,8 +14,7 @@ from typing import (Any,
                     Dict,
                     List,
                     Mapping,
-                    Optional,
-                    Sequence)
+                    Optional)
 
 from aiohttp import (ClientError,
                      web,
