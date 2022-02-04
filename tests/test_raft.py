@@ -231,6 +231,20 @@ class Cluster(RuleBasedStateMachine):
                                                    new_nodes_states))
 
     @invariant()
+    def leader_completeness(self) -> None:
+        old_nodes_states = self._nodes_states
+        self.update_states()
+        new_nodes_states = self._nodes_states
+        assert all(
+                implication(new_state.role is Role.LEADER
+                            and new_state.term > old_state.term,
+                            all(map(eq,
+                                    new_state.log[:old_state.commit_length],
+                                    old_state.log[:old_state.commit_length])))
+                for old_state, new_state in zip(old_nodes_states,
+                                                new_nodes_states))
+
+    @invariant()
     def log_matching(self) -> None:
         self.update_states()
         clusters_states = self._cluster_states
