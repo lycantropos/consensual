@@ -8,6 +8,7 @@ from collections import (Counter,
                          deque)
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from operator import eq
 from typing import (Iterator,
                     List,
                     Optional,
@@ -219,16 +220,28 @@ class Cluster(RuleBasedStateMachine):
         self._urls: Set[URL] = set()
 
     @invariant()
-    def log_matching(self) -> None:
+    def leader_append_only(self) -> None:
         old_nodes_states = self._nodes_states
         self.update_states()
         new_nodes_states = self._nodes_states
-        assert all(implication(old_record.term == new_record.term,
-                               old_record == new_record)
+        assert all(implication(new_state.role is Role.LEADER,
+                               len(new_state.log) >= len(old_state.log)
+                               and all(eq, new_state.log, old_state.log))
                    for old_state, new_state in zip(old_nodes_states,
-                                                   new_nodes_states)
-                   for old_record, new_record in zip(old_state.log,
-                                                     new_state.log))
+                                                   new_nodes_states))
+
+    @invariant()
+    def log_matching(self) -> None:
+        self.update_states()
+        clusters_states = self._cluster_states
+        nodes_states = self._nodes_states
+        same_records = defaultdict(list)
+        for node_state in nodes_states:
+            for index, record in enumerate(node_state.log):
+                (same_records[(index, record.term, record.cluster_id)]
+                 .append(record))
+        assert all(map(eq, records, records[1:])
+                   for records in same_records.values())
 
     @invariant()
     def election_safety(self) -> None:
