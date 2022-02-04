@@ -176,6 +176,17 @@ class Cluster(RuleBasedStateMachine):
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
+    @rule(nodes=running_nodes)
+    def delete_nodes(self, nodes: List[RunningNode]) -> None:
+        clusters_states_before = self.load_clusters_states(nodes)
+        nodes_states_before = self.load_nodes_states(nodes)
+        errors = list(self._executor.map(RunningNode.delete, nodes))
+        assert all(equivalence(error is None,
+                               cluster_state.stable
+                               and node_state.leader_node_id is not None)
+                   for cluster_state, node_state, error
+                   in zip(clusters_states_before, nodes_states_before, errors))
+
     @rule(nodes=running_nodes,
           parameters=consumes(parameters))
     def log(self,
@@ -187,17 +198,6 @@ class Cluster(RuleBasedStateMachine):
                                node_state_before.leader_node_id is not None)
                    for node_state_before, error in zip(nodes_states_before,
                                                        errors))
-
-    @rule(nodes=running_nodes)
-    def delete_nodes(self, nodes: List[RunningNode]) -> None:
-        clusters_states_before = self.load_clusters_states(nodes)
-        nodes_states_before = self.load_nodes_states(nodes)
-        errors = list(self._executor.map(RunningNode.delete, nodes))
-        assert all(equivalence(error is None,
-                               cluster_state.stable
-                               and node_state.leader_node_id is not None)
-                   for cluster_state, node_state, error
-                   in zip(clusters_states_before, nodes_states_before, errors))
 
     @rule(target=running_nodes,
           nodes=consumes(shutdown_nodes))
