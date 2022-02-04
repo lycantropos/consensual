@@ -18,7 +18,7 @@ from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
                                  consumes,
                                  invariant,
-                                 multiple,
+                                 precondition,
                                  rule)
 from yarl import URL
 
@@ -131,6 +131,10 @@ class Cluster(RuleBasedStateMachine):
                           target_nodes_states_before,
                           source_nodes_states_before, errors))
 
+    def is_not_full(self) -> bool:
+        return len(self._urls) < MAX_RUNNING_NODES_COUNT
+
+    @precondition(is_not_full)
     @rule(target=running_nodes,
           processors=strategies.processors_dicts_lists,
           heartbeat=strategies.heartbeats,
@@ -139,9 +143,6 @@ class Cluster(RuleBasedStateMachine):
                      heartbeat: float,
                      processors: List[Dict[str, Processor]],
                      urls: List[URL]) -> List[RunningNode]:
-        if len(self._urls) == MAX_RUNNING_NODES_COUNT:
-            return multiple()
-        assert len(self._urls) < MAX_RUNNING_NODES_COUNT
         max_new_nodes_count = MAX_RUNNING_NODES_COUNT - len(self._urls)
         new_urls = list(set(urls) - self._urls)[:max_new_nodes_count]
         extra_processors_count = len(new_urls) - len(processors)
