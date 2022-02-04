@@ -473,7 +473,7 @@ class Node:
         self._processors[END_CLUSTER_STATE_UPDATE_ACTION] = (
             Node._end_cluster_state_update)
 
-    __repr__ = generate_repr(from_url,
+    __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
 
     @property
