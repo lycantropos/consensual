@@ -226,7 +226,7 @@ class Cluster(RuleBasedStateMachine):
         new_nodes_states = self._nodes_states
         assert all(implication(new_state.role is Role.LEADER,
                                len(new_state.log) >= len(old_state.log)
-                               and all(eq, new_state.log, old_state.log))
+                               and all(map(eq, new_state.log, old_state.log)))
                    for old_state, new_state in zip(old_nodes_states,
                                                    new_nodes_states))
 
