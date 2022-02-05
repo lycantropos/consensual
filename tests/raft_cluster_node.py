@@ -205,9 +205,8 @@ def _run_node(url: URL,
                          heartbeat=heartbeat,
                          logger=to_logger(url.authority),
                          processors=processors)
-    node._app.middlewares.append(to_simulate_latency_middleware(
-            random_seed=random_seed,
-            heartbeat=heartbeat))
+    node._app.middlewares.append(to_latency_simulator(max_delay=heartbeat,
+                                                      random_seed=random_seed))
     return node.run()
 
 
@@ -215,17 +214,19 @@ Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 Middleware = Callable[[web.Request, Handler], Awaitable[web.StreamResponse]]
 
 
-def to_simulate_latency_middleware(*,
-                                   random_seed: int,
-                                   heartbeat: float) -> Middleware:
-    generate_uniform = Random(random_seed).uniform
-
+def to_latency_simulator(*,
+                         max_delay: float,
+                         random_seed: int) -> Middleware:
     @web.middleware
     async def middleware(request: web.Request,
-                         handler: Handler) -> web.StreamResponse:
-        await asyncio.sleep(generate_uniform(0, heartbeat))
+                         handler: Handler,
+                         generate_uniform: Callable[[float, float], float]
+                         = Random(random_seed).uniform,
+                         step_max_delay: float = 3 * max_delay / 4
+                         ) -> web.StreamResponse:
+        await asyncio.sleep(generate_uniform(0, step_max_delay))
         result = await handler(request)
-        await asyncio.sleep(generate_uniform(0, heartbeat))
+        await asyncio.sleep(generate_uniform(0, step_max_delay))
         return result
 
     return middleware
