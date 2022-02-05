@@ -19,6 +19,7 @@ from hypothesis.stateful import (Bundle,
                                  multiple,
                                  precondition,
                                  rule)
+from hypothesis.strategies import DataObject
 
 from consensual.raft import (Processor,
                              Role)
@@ -132,13 +133,15 @@ class RaftNetwork(RuleBasedStateMachine):
                           source_nodes_states_before, errors))
 
     @rule(target=running_nodes_with_log_arguments,
-          nodes_with_log_arguments=running_nodes.flatmap(
-                  strategies.to_nodes_with_log_arguments_lists))
+          data=strategies.data,
+          nodes=running_nodes)
     def attach_log_arguments(self,
-                             nodes_with_log_arguments
-                             : List[Tuple[RaftClusterNode, str, Any]]
+                             data: DataObject,
+                             nodes: List[RaftClusterNode]
                              ) -> Tuple[List[RaftClusterNode], List[str],
                                         List[Any]]:
+        nodes_with_log_arguments = data.draw(
+                strategies.to_nodes_with_log_arguments_lists(nodes))
         return (transpose(nodes_with_log_arguments)
                 if nodes_with_log_arguments
                 else multiple())
