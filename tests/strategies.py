@@ -1,5 +1,6 @@
 import string
 import time
+from operator import add
 from typing import (Any,
                     List,
                     Sequence,
@@ -36,14 +37,25 @@ def waiting_processor(node: Node, parameters: float) -> None:
     time.sleep(parameters)
 
 
-short_paths_letters = strategies.sampled_from(string.digits
+plain_paths_letters = strategies.sampled_from(string.digits
                                               + string.ascii_letters)
-long_paths_letters = short_paths_letters | strategies.sampled_from('-./_~')
-paths = ((strategies.text(short_paths_letters,
-                          min_size=1)
-          | strategies.text(long_paths_letters,
-                            min_size=2))
-         .map('/{}'.format))
+paths_infixes_letters = plain_paths_letters | strategies.sampled_from(' -./_~')
+paths_infixes = strategies.text(paths_infixes_letters,
+                                min_size=1)
+
+
+def to_longer_base_paths(strategy: SearchStrategy[str]) -> SearchStrategy[str]:
+    return strategies.builds(add, strategy, paths_infixes)
+
+
+plain_base_paths = strategies.text(plain_paths_letters,
+                                   min_size=1)
+base_paths = (plain_base_paths
+              | strategies.builds(add,
+                                  strategies.recursive(plain_base_paths,
+                                                       to_longer_base_paths),
+                                  plain_base_paths))
+paths = base_paths.map('/{}'.format)
 processors_parameters = {waiting_processor: strategies.floats(-10, 10)}
 processors = strategies.sampled_from(list(processors_parameters))
 processors_dicts = strategies.dictionaries(keys=paths,
