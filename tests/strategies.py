@@ -38,10 +38,7 @@ def waiting_processor(node: Node, parameters: float) -> None:
 
 short_paths_letters = strategies.sampled_from(string.digits
                                               + string.ascii_letters)
-long_paths_letters = (
-        short_paths_letters
-        | strategies.sampled_from(string.whitespace
-                                  + '!"#$&\'()*+,-./:;<=>?@[\\]^_`|~'))
+long_paths_letters = short_paths_letters | strategies.sampled_from('-./_~')
 paths = ((strategies.text(short_paths_letters,
                           min_size=1)
           | strategies.text(long_paths_letters,
