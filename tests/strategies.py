@@ -14,7 +14,7 @@ from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_RUNNING_NODES_COUNT
 
 heartbeats = strategies.floats(1, 2)
-delays = strategies.floats(1, 2)
+delays = strategies.floats(0, 1)
 hosts = strategies.just('localhost')
 ports_ranges_starts = strategies.integers(4000, 4500)
 ports_ranges_lengths = strategies.integers(100, 500)
@@ -22,7 +22,7 @@ ports_ranges_lengths = strategies.integers(100, 500)
 
 def to_ports_range(start: int, length: int) -> Sequence[int]:
     assert start > 0
-    assert length > 0
+    assert length >= MAX_RUNNING_NODES_COUNT
     return range(start, start + length)
 
 
