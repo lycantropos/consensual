@@ -220,6 +220,10 @@ class RaftNetwork(RuleBasedStateMachine):
                        if node not in shutdown_nodes]
         return nodes
 
+    def is_not_empty(self) -> bool:
+        return bool(self._nodes)
+
+    @precondition(is_not_empty)
     @rule(delay=strategies.delays)
     def wait(self, delay: float) -> None:
         time.sleep(delay)

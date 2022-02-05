@@ -14,7 +14,7 @@ from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_RUNNING_NODES_COUNT
 
 heartbeats = strategies.floats(1, 2)
-delays = strategies.floats(2, 4)
+delays = strategies.floats(1, 2)
 hosts = strategies.just('localhost')
 ports_ranges_starts = strategies.integers(4000, 4500)
 ports_ranges_lengths = strategies.integers(100, 500)
