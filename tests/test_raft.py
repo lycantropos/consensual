@@ -105,8 +105,6 @@ class RaftNetwork(RuleBasedStateMachine):
                    for node_id, new_term in new_terms.items())
 
     running_nodes = Bundle('running_nodes')
-    running_nodes_with_log_arguments = Bundle(
-            'running_nodes_with_log_arguments')
     shutdown_nodes = Bundle('shutdown_nodes')
 
     @rule(target=running_nodes,
@@ -133,20 +131,6 @@ class RaftNetwork(RuleBasedStateMachine):
                           target_nodes_states_before,
                           source_nodes_states_before, errors))
         return multiple(source_nodes, target_nodes)
-
-    @rule(target=running_nodes_with_log_arguments,
-          data=strategies.data,
-          nodes=running_nodes)
-    def attach_log_arguments(self,
-                             data: DataObject,
-                             nodes: List[RaftClusterNode]
-                             ) -> Tuple[List[RaftClusterNode], List[str],
-                                        List[Any]]:
-        nodes_with_log_arguments = data.draw(
-                strategies.to_nodes_with_log_arguments_lists(nodes))
-        return (transpose(nodes_with_log_arguments)
-                if nodes_with_log_arguments
-                else multiple())
 
     def is_not_full(self) -> bool:
         return len(self._nodes) < MAX_RUNNING_NODES_COUNT
@@ -187,10 +171,15 @@ class RaftNetwork(RuleBasedStateMachine):
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
-    @rule(nodes_with_arguments=running_nodes_with_log_arguments)
-    def log(self,
-            nodes_with_arguments
-            : Tuple[List[RaftClusterNode], List[str], List[Any]]) -> None:
+    @rule(data=strategies.data,
+          nodes=running_nodes)
+    def log(self, data: DataObject, nodes: List[RaftClusterNode]) -> None:
+        arguments = data.draw(
+                strategies.to_nodes_with_log_arguments_lists(nodes)
+        )
+        if not arguments:
+            return
+        nodes_with_arguments = transpose(arguments)
         nodes, *rest_arguments = nodes_with_arguments
         nodes_states_before = self.load_nodes_states(nodes)
         errors = list(self._executor.map(RaftClusterNode.log, nodes,
