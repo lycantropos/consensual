@@ -104,8 +104,11 @@ class Communication(Generic[_Receiver, _Path]):
                         timeout=self.heartbeat,
                         heartbeat=self.heartbeat) as connection:
                     message_start = to_time()
-                    await connection.send_json({'path': path,
-                                                'message': message})
+                    try:
+                        await connection.send_json({'path': path,
+                                                    'message': message})
+                    except (ClientError, OSError):
+                        continue
                     async for reply in connection:
                         reply: web_ws.WSMessage
                         reply_end = to_time()
@@ -114,8 +117,11 @@ class Communication(Generic[_Receiver, _Path]):
                         results[path].put_nowait(Ok(reply.json()))
                         path, message = await messages.get()
                         message_start = to_time()
-                        await connection.send_json({'path': path,
-                                                    'message': message})
+                        try:
+                            await connection.send_json({'path': path,
+                                                        'message': message})
+                        except (ClientError, OSError):
+                            continue
             except (ClientError, OSError) as exception:
                 results[path].put_nowait(Error(exception))
                 path, message = await messages.get()
