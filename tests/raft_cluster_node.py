@@ -1,6 +1,7 @@
 import asyncio
+import atexit
 import logging.config
-import multiprocessing
+import multiprocessing.synchronize
 import sys
 import time
 from random import Random
@@ -39,10 +40,11 @@ class RaftClusterNode:
             heartbeat, processors, random_seed, url,
         )
         self._url_string = str(url)
+        self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
                 target=_run_node,
                 args=(self.url, self.processors, self.heartbeat,
-                      self.random_seed))
+                      self.random_seed, self._event))
         self._session = Session()
 
     __repr__ = generate_repr(__init__)
@@ -67,9 +69,9 @@ class RaftClusterNode:
                        heartbeat=heartbeat)
             process = self._process
             process.start()
-            process.join(3)
-            if process.exitcode is not None:
-                process.kill()
+            self._event.wait()
+            time.sleep(1)
+            if not process.is_alive():
                 del candidates[index]
                 continue
             break
@@ -141,10 +143,11 @@ class RaftClusterNode:
 
     def restart(self) -> None:
         assert self._process is None
+        self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
                 target=_run_node,
                 args=(self.url, self.processors, self.heartbeat,
-                      self.random_seed))
+                      self.random_seed, self._event))
         self._process.start()
 
     def stop(self) -> None:
@@ -198,7 +201,9 @@ def to_logger(name: str,
 def _run_node(url: URL,
               processors: Dict[str, Processor],
               heartbeat: float,
-              random_seed: int) -> None:
+              random_seed: int,
+              event: multiprocessing.synchronize.Event) -> None:
+    atexit.register(event.set)
     node = Node.from_url(url,
                          heartbeat=heartbeat,
                          logger=to_logger(url.authority),
@@ -206,7 +211,12 @@ def _run_node(url: URL,
     node._app.middlewares.append(to_latency_simulator(
             max_delay=heartbeat / (2 * MAX_RUNNING_NODES_COUNT),
             random_seed=random_seed))
-    return node.run()
+    url = node.url
+    web.run_app(node._app,
+                host=url.host,
+                port=url.port,
+                loop=node._loop,
+                print=lambda message: event.set() or print(message))
 
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
