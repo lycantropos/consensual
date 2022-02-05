@@ -157,19 +157,12 @@ class RaftNetwork(RuleBasedStateMachine):
                      ) -> List[RaftClusterNode]:
         max_new_nodes_count = MAX_RUNNING_NODES_COUNT - len(self._nodes)
         nodes_parameters = nodes_parameters[:max_new_nodes_count]
-        nodes = list(
-                self._executor.map(partial(RaftClusterNode.from_ports_range,
-                                           heartbeat=heartbeat),
-                                   *transpose(nodes_parameters)))
-        _exhaust(self._executor.map(RaftClusterNode.start, nodes))
+        nodes = list(self._executor.map(
+                partial(RaftClusterNode.running_from_one_of_ports,
+                        heartbeat=heartbeat),
+                *transpose(nodes_parameters)))
         self._nodes.extend(nodes)
-        for _ in range(5):
-            try:
-                self.update_states()
-            except OSError:
-                time.sleep(1)
-            else:
-                break
+        self.update_states()
         return nodes
 
     @rule(nodes=running_nodes)
@@ -206,7 +199,7 @@ class RaftNetwork(RuleBasedStateMachine):
           nodes=consumes(shutdown_nodes))
     def restart_nodes(self, nodes: List[RaftClusterNode]
                       ) -> List[RaftClusterNode]:
-        _exhaust(self._executor.map(RaftClusterNode.start, nodes))
+        _exhaust(self._executor.map(RaftClusterNode.restart, nodes))
         self._nodes += nodes
         return nodes
 

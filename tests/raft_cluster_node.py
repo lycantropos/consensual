@@ -1,7 +1,6 @@
 import asyncio
 import logging.config
 import multiprocessing
-import socket
 import sys
 import time
 from random import Random
@@ -40,35 +39,43 @@ class RaftClusterNode:
             heartbeat, processors, random_seed, url,
         )
         self._url_string = str(url)
-        self._process: Optional[multiprocessing.Process] = None
+        self._process = multiprocessing.Process(
+                target=_run_node,
+                args=(self.url, self.processors, self.heartbeat,
+                      self.random_seed))
         self._session = Session()
 
     __repr__ = generate_repr(__init__)
 
     @classmethod
-    def from_ports_range(cls,
-                         host: str,
-                         ports: Sequence[int],
-                         processors: Dict[str, Processor],
-                         random_seed: int,
-                         *,
-                         heartbeat: float) -> 'RaftClusterNode':
+    def running_from_one_of_ports(cls,
+                                  host: str,
+                                  ports: Sequence[int],
+                                  processors: Dict[str, Processor],
+                                  random_seed: int,
+                                  *,
+                                  heartbeat: float) -> 'RaftClusterNode':
         candidates = list(ports)
         generate_index = Random(random_seed).randrange
         while candidates:
             index = generate_index(0, len(candidates))
             candidate = candidates[index]
-            if not is_url_reachable(host, candidate):
-                port = candidate
-                break
-            del candidates[index]
+            url = URL.build(scheme='http',
+                            host=host,
+                            port=candidate)
+            self = cls(url, processors, random_seed,
+                       heartbeat=heartbeat)
+            process = self._process
+            process.start()
+            process.join(3)
+            if process.exitcode is not None:
+                process.kill()
+                del candidates[index]
+                continue
+            break
         else:
             raise RuntimeError(f'all ports from {ports} are occupied')
-        url = URL.build(scheme='http',
-                        host=host,
-                        port=port)
-        return cls(url, processors, random_seed,
-                   heartbeat=heartbeat)
+        return self
 
     def __eq__(self, other: 'RaftClusterNode') -> bool:
         return (self.url == other.url
@@ -99,7 +106,7 @@ class RaftClusterNode:
         return response.json()['error']
 
     def load_cluster_state(self) -> RaftClusterState:
-        response = self._get(str(self.url.with_path('/cluster')))
+        response = self._get('/cluster')
         response.raise_for_status()
         raw_state = response.json()
         raw_id, heartbeat, nodes_ids, stable = (
@@ -112,7 +119,7 @@ class RaftClusterNode:
                                 stable=stable)
 
     def load_node_state(self) -> RaftNodeState:
-        response = self._get(str(self.url.with_path('/node')))
+        response = self._get('/node')
         response.raise_for_status()
         raw_state = response.json()
         (
@@ -132,7 +139,8 @@ class RaftClusterNode:
                              supported_node_id=supported_node_id,
                              term=term)
 
-    def start(self) -> None:
+    def restart(self) -> None:
+        assert self._process is None
         self._process = multiprocessing.Process(
                 target=_run_node,
                 args=(self.url, self.processors, self.heartbeat,
@@ -142,16 +150,21 @@ class RaftClusterNode:
     def stop(self) -> None:
         self._session.close()
         assert self._process is not None
-        while self._process.is_alive():
+        for _ in range(5):
+            if not self._process.is_alive():
+                break
             self._process.terminate()
             time.sleep(1)
-        assert not is_url_reachable(self.url.host, self.url.port)
+        else:
+            self._process.kill()
+            time.sleep(5)
+        self._process = None
 
-    def _get(self, endpoint: str) -> Response:
+    def _get(self, path: str) -> Response:
         last_error = None
         for _ in range(10):
             try:
-                response = self._session.get(endpoint)
+                response = self._session.get(str(self.url.with_path(path)))
             except OSError as error:
                 last_error = error
                 time.sleep(1)
@@ -160,17 +173,6 @@ class RaftClusterNode:
         else:
             raise last_error
         return response
-
-
-def is_url_reachable(host: str, port: int) -> bool:
-    connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    with connection:
-        try:
-            connection.connect((host, port))
-        except ConnectionRefusedError:
-            return False
-        else:
-            return True
 
 
 def to_logger(name: str,
