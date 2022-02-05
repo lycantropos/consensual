@@ -58,8 +58,7 @@ class RaftClusterNode:
         while candidates:
             index = generate_index(0, len(candidates))
             candidate = candidates[index]
-            if not is_url_reachable(host, candidate,
-                                    timeout=heartbeat):
+            if not is_url_reachable(host, candidate):
                 port = candidate
                 break
             del candidates[index]
@@ -146,8 +145,7 @@ class RaftClusterNode:
         while self._process.is_alive():
             self._process.terminate()
             time.sleep(1)
-        assert not is_url_reachable(self.url.host, self.url.port,
-                                    timeout=self.heartbeat)
+        assert not is_url_reachable(self.url.host, self.url.port)
 
     def _get(self, endpoint: str) -> Response:
         last_error = None
@@ -164,15 +162,12 @@ class RaftClusterNode:
         return response
 
 
-def is_url_reachable(host: str, port: int,
-                     *,
-                     timeout: float) -> bool:
+def is_url_reachable(host: str, port: int) -> bool:
     connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    connection.settimeout(timeout)
     with connection:
         try:
             connection.connect((host, port))
-        except OSError:
+        except ConnectionRefusedError:
             return False
         else:
             return True
