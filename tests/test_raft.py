@@ -4,9 +4,8 @@ from collections import (Counter,
                          deque)
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from itertools import (chain,
-                       repeat)
-from operator import eq
+from operator import (eq,
+                      itemgetter)
 from typing import (Any,
                     Dict,
                     Iterator,
@@ -167,6 +166,7 @@ class Cluster(RuleBasedStateMachine):
                                                 heartbeat=heartbeat),
                                         *transpose(new_nodes_parameters)))
         _exhaust(self._executor.map(RunningNode.start, nodes))
+        new_urls = map(itemgetter(0), new_nodes_parameters)
         self._urls.update(new_urls)
         self._nodes.extend(nodes)
         for _ in range(5):
