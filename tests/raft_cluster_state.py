@@ -6,7 +6,7 @@ from consensual.raft import (ClusterId,
                              NodeId)
 
 
-class RunningClusterState:
+class RaftClusterState:
     def __init__(self,
                  _id: ClusterId,
                  *,

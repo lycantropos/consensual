@@ -1,16 +1,16 @@
 import asyncio
 import logging.config
 import multiprocessing
-import random
 import socket
 import sys
 import time
+from random import Random
 from typing import (Any,
                     Awaitable,
                     Callable,
                     Dict,
                     Optional,
-                    Tuple)
+                    Sequence)
 
 import requests
 from aiohttp import web
@@ -24,11 +24,11 @@ from consensual.raft import (ClusterId,
                              Processor,
                              Record,
                              Role)
-from .running_cluster_state import RunningClusterState
-from .running_node_state import RunningNodeState
+from .raft_cluster_state import RaftClusterState
+from .raft_node_state import RaftNodeState
 
 
-class RunningNode:
+class RaftClusterNode:
     def __init__(self,
                  url: URL,
                  processors: Dict[str, Processor],
@@ -44,15 +44,41 @@ class RunningNode:
 
     __repr__ = generate_repr(__init__)
 
-    def __eq__(self, other: 'RunningNode') -> bool:
-        return (self.url == other.url and self.heartbeat == other.heartbeat
-                if isinstance(other, RunningNode)
+    @classmethod
+    def from_ports_range(cls,
+                         host: str,
+                         ports: Sequence[int],
+                         processors: Dict[str, Processor],
+                         random_seed: int,
+                         *,
+                         heartbeat: float) -> 'RaftClusterNode':
+        candidates = list(ports)
+        generate_index = Random(random_seed).randrange
+        while candidates:
+            index = generate_index(0, len(candidates))
+            candidate = candidates[index]
+            if not is_url_reachable(host, candidate,
+                                    timeout=heartbeat):
+                port = candidate
+                break
+            del candidates[index]
+        else:
+            raise RuntimeError(f'all ports from {ports} are occupied')
+        url = URL.build(scheme='http',
+                        host=host,
+                        port=port)
+        return cls(url, processors, random_seed,
+                   heartbeat=heartbeat)
+
+    def __eq__(self, other: 'RaftClusterNode') -> bool:
+        return (self.url == other.url
+                if isinstance(other, RaftClusterNode)
                 else NotImplemented)
 
     def __hash__(self) -> int:
-        return hash((self.url, self.heartbeat))
+        return hash(self.url)
 
-    def add(self, *nodes: 'RunningNode') -> Optional[str]:
+    def add(self, *nodes: 'RaftClusterNode') -> Optional[str]:
         response = requests.post(self._url_string,
                                  json=[str(node.url) for node in nodes])
         response.raise_for_status()
@@ -72,7 +98,7 @@ class RunningNode:
         response.raise_for_status()
         return response.json()['error']
 
-    def load_cluster_state(self) -> RunningClusterState:
+    def load_cluster_state(self) -> RaftClusterState:
         response = self._get(str(self.url.with_path('/cluster')))
         response.raise_for_status()
         raw_state = response.json()
@@ -80,12 +106,12 @@ class RunningNode:
             raw_state['id'], raw_state['heartbeat'], raw_state['nodes_ids'],
             raw_state['stable'],
         )
-        return RunningClusterState(ClusterId.from_json(raw_id),
-                                   heartbeat=heartbeat,
-                                   nodes_ids=nodes_ids,
-                                   stable=stable)
+        return RaftClusterState(ClusterId.from_json(raw_id),
+                                heartbeat=heartbeat,
+                                nodes_ids=nodes_ids,
+                                stable=stable)
 
-    def load_node_state(self) -> RunningNodeState:
+    def load_node_state(self) -> RaftNodeState:
         response = self._get(str(self.url.with_path('/node')))
         response.raise_for_status()
         raw_state = response.json()
@@ -98,13 +124,13 @@ class RunningNode:
             raw_state['supported_node_id'], raw_state['term'],
         )
         log = [Record.from_json(**raw_record) for raw_record in raw_log]
-        return RunningNodeState(id_,
-                                commit_length=commit_length,
-                                leader_node_id=leader_node_id,
-                                log=log,
-                                role=Role(raw_node_role),
-                                supported_node_id=supported_node_id,
-                                term=term)
+        return RaftNodeState(id_,
+                             commit_length=commit_length,
+                             leader_node_id=leader_node_id,
+                             log=log,
+                             role=Role(raw_node_role),
+                             supported_node_id=supported_node_id,
+                             term=term)
 
     def start(self) -> None:
         self._process = multiprocessing.Process(
@@ -118,8 +144,9 @@ class RunningNode:
         assert self._process is not None
         while self._process.is_alive():
             self._process.terminate()
-            time.sleep(0.5)
-        assert not is_url_reachable(self.url)
+            time.sleep(1)
+        assert not is_url_reachable(self.url.host, self.url.port,
+                                    timeout=self.heartbeat)
 
     def _get(self, endpoint: str) -> Response:
         last_error = None
@@ -136,12 +163,14 @@ class RunningNode:
         return response
 
 
-def is_url_reachable(url: URL) -> bool:
+def is_url_reachable(host: str, port: int,
+                     *,
+                     timeout: float) -> bool:
     connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    connection.settimeout(2)
+    connection.settimeout(timeout)
     with connection:
         try:
-            connection.connect((url.host, url.port))
+            connection.connect((host, port))
         except OSError:
             return False
         else:
@@ -189,14 +218,14 @@ Middleware = Callable[[web.Request, Handler], Awaitable[web.StreamResponse]]
 def to_simulate_latency_middleware(*,
                                    random_seed: int,
                                    heartbeat: float) -> Middleware:
-    to_random_uniform = random.Random(random_seed).uniform
+    generate_uniform = Random(random_seed).uniform
 
     @web.middleware
     async def middleware(request: web.Request,
                          handler: Handler) -> web.StreamResponse:
-        await asyncio.sleep(to_random_uniform(0, heartbeat))
+        await asyncio.sleep(generate_uniform(0, heartbeat))
         result = await handler(request)
-        await asyncio.sleep(to_random_uniform(0, heartbeat))
+        await asyncio.sleep(generate_uniform(0, heartbeat))
         return result
 
     return middleware

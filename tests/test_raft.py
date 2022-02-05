@@ -4,13 +4,12 @@ from collections import (Counter,
                          deque)
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from operator import (eq,
-                      itemgetter)
+from operator import eq
 from typing import (Any,
                     Dict,
                     Iterator,
                     List,
-                    Set,
+                    Sequence,
                     Tuple)
 
 from hypothesis.stateful import (Bundle,
@@ -20,28 +19,26 @@ from hypothesis.stateful import (Bundle,
                                  multiple,
                                  precondition,
                                  rule)
-from yarl import URL
 
 from consensual.raft import (Processor,
                              Role)
 from . import strategies
-from .running_cluster_state import RunningClusterState
-from .running_node import RunningNode
-from .running_node_state import RunningNodeState
+from .raft_cluster_node import RaftClusterNode
+from .raft_cluster_state import RaftClusterState
+from .raft_node_state import RaftNodeState
 from .utils import (MAX_RUNNING_NODES_COUNT,
                     equivalence,
                     implication,
                     transpose)
 
 
-class Cluster(RuleBasedStateMachine):
+class RaftNetwork(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
         self._executor = ThreadPoolExecutor()
-        self._nodes: List[RunningNode] = []
-        self._cluster_states: List[RunningClusterState] = []
-        self._nodes_states: List[RunningNodeState] = []
-        self._urls: Set[URL] = set()
+        self._nodes: List[RaftClusterNode] = []
+        self._cluster_states: List[RaftClusterState] = []
+        self._nodes_states: List[RaftNodeState] = []
 
     @invariant()
     def leader_append_only(self) -> None:
@@ -114,13 +111,14 @@ class Cluster(RuleBasedStateMachine):
     @rule(source_nodes=running_nodes,
           target_nodes=running_nodes)
     def add_nodes(self,
-                  target_nodes: List[RunningNode],
-                  source_nodes: List[RunningNode]) -> List[RunningNode]:
+                  target_nodes: List[RaftClusterNode],
+                  source_nodes: List[RaftClusterNode]) -> List[
+        RaftClusterNode]:
         source_nodes = source_nodes[:len(target_nodes)]
         source_nodes_states_before = self.load_nodes_states(source_nodes)
         target_clusters_states_before = self.load_clusters_states(target_nodes)
         target_nodes_states_before = self.load_nodes_states(target_nodes)
-        errors = list(self._executor.map(RunningNode.add, target_nodes,
+        errors = list(self._executor.map(RaftClusterNode.add, target_nodes,
                                          source_nodes))
         assert all(equivalence(error is None,
                                target_cluster_state.stable
@@ -138,15 +136,15 @@ class Cluster(RuleBasedStateMachine):
                   strategies.to_nodes_with_log_arguments_lists))
     def attach_log_arguments(self,
                              nodes_with_log_arguments
-                             : List[Tuple[RunningNode, str, Any]]
-                             ) -> Tuple[List[RunningNode], List[str],
+                             : List[Tuple[RaftClusterNode, str, Any]]
+                             ) -> Tuple[List[RaftClusterNode], List[str],
                                         List[Any]]:
         return (transpose(nodes_with_log_arguments)
                 if nodes_with_log_arguments
                 else multiple())
 
     def is_not_full(self) -> bool:
-        return len(self._urls) < MAX_RUNNING_NODES_COUNT
+        return len(self._nodes) < MAX_RUNNING_NODES_COUNT
 
     @precondition(is_not_full)
     @rule(target=running_nodes,
@@ -154,20 +152,16 @@ class Cluster(RuleBasedStateMachine):
           nodes_parameters=strategies.running_nodes_parameters_lists)
     def create_nodes(self,
                      heartbeat: float,
-                     nodes_parameters
-                     : List[Tuple[URL, Dict[str, Processor], int]]
-                     ) -> List[RunningNode]:
-        new_nodes_parameters = [
-                                   node_parameters
-                                   for node_parameters in nodes_parameters
-                                   if node_parameters[0] not in self._urls
-                               ][:MAX_RUNNING_NODES_COUNT - len(self._urls)]
-        nodes = list(self._executor.map(partial(RunningNode,
-                                                heartbeat=heartbeat),
-                                        *transpose(new_nodes_parameters)))
-        _exhaust(self._executor.map(RunningNode.start, nodes))
-        new_urls = map(itemgetter(0), new_nodes_parameters)
-        self._urls.update(new_urls)
+                     nodes_parameters: List[Tuple[str, Sequence[int],
+                                                  Dict[str, Processor], int]]
+                     ) -> List[RaftClusterNode]:
+        max_new_nodes_count = MAX_RUNNING_NODES_COUNT - len(self._nodes)
+        nodes_parameters = nodes_parameters[:max_new_nodes_count]
+        nodes = list(
+                self._executor.map(partial(RaftClusterNode.from_ports_range,
+                                           heartbeat=heartbeat),
+                                   *transpose(nodes_parameters)))
+        _exhaust(self._executor.map(RaftClusterNode.start, nodes))
         self._nodes.extend(nodes)
         for _ in range(5):
             try:
@@ -179,10 +173,10 @@ class Cluster(RuleBasedStateMachine):
         return nodes
 
     @rule(nodes=running_nodes)
-    def delete_nodes(self, nodes: List[RunningNode]) -> None:
+    def delete_nodes(self, nodes: List[RaftClusterNode]) -> None:
         clusters_states_before = self.load_clusters_states(nodes)
         nodes_states_before = self.load_nodes_states(nodes)
-        errors = list(self._executor.map(RunningNode.delete, nodes))
+        errors = list(self._executor.map(RaftClusterNode.delete, nodes))
         assert all(equivalence(error is None,
                                cluster_state.stable
                                and node_state.leader_node_id is not None)
@@ -190,17 +184,17 @@ class Cluster(RuleBasedStateMachine):
                    in zip(clusters_states_before, nodes_states_before, errors))
 
     @rule(nodes=running_nodes)
-    def initialize_nodes(self, nodes: List[RunningNode]) -> None:
-        _exhaust(self._executor.map(RunningNode.initialize, nodes))
+    def initialize_nodes(self, nodes: List[RaftClusterNode]) -> None:
+        _exhaust(self._executor.map(RaftClusterNode.initialize, nodes))
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
     @rule(nodes_with_arguments=running_nodes_with_log_arguments)
     def log(self,
             nodes_with_arguments
-            : Tuple[List[RunningNode], List[str], List[Any]]) -> None:
+            : Tuple[List[RaftClusterNode], List[str], List[Any]]) -> None:
         nodes_states_before = self.load_nodes_states(nodes)
-        errors = list(self._executor.map(RunningNode.log,
+        errors = list(self._executor.map(RaftClusterNode.log,
                                          *nodes_with_arguments))
         assert all(equivalence(error is None,
                                node_state_before.leader_node_id is not None)
@@ -209,15 +203,17 @@ class Cluster(RuleBasedStateMachine):
 
     @rule(target=running_nodes,
           nodes=consumes(shutdown_nodes))
-    def restart_nodes(self, nodes: List[RunningNode]) -> List[RunningNode]:
-        _exhaust(self._executor.map(RunningNode.start, nodes))
+    def restart_nodes(self, nodes: List[RaftClusterNode]) -> List[
+        RaftClusterNode]:
+        _exhaust(self._executor.map(RaftClusterNode.start, nodes))
         self._nodes += nodes
         return nodes
 
     @rule(target=shutdown_nodes,
           nodes=consumes(running_nodes))
-    def shutdown_nodes(self, nodes: List[RunningNode]) -> List[RunningNode]:
-        _exhaust(self._executor.map(RunningNode.stop, nodes))
+    def shutdown_nodes(self, nodes: List[RaftClusterNode]) -> List[
+        RaftClusterNode]:
+        _exhaust(self._executor.map(RaftClusterNode.stop, nodes))
         shutdown_nodes = frozenset(nodes)
         self._nodes = [node
                        for node in self._nodes
@@ -229,20 +225,21 @@ class Cluster(RuleBasedStateMachine):
         time.sleep(delay)
 
     def teardown(self) -> None:
-        _exhaust(self._executor.map(RunningNode.stop, self._nodes))
+        _exhaust(self._executor.map(RaftClusterNode.stop, self._nodes))
         self._executor.shutdown()
 
     def update_states(self) -> None:
         self._cluster_states = self.load_clusters_states(self._nodes)
         self._nodes_states = self.load_nodes_states(self._nodes)
 
-    def load_clusters_states(self, nodes: List[RunningNode]
-                             ) -> List[RunningClusterState]:
-        return list(self._executor.map(RunningNode.load_cluster_state, nodes))
+    def load_clusters_states(self, nodes: List[RaftClusterNode]
+                             ) -> List[RaftClusterState]:
+        return list(self._executor.map(RaftClusterNode.load_cluster_state,
+                                       nodes))
 
-    def load_nodes_states(self, nodes: List[RunningNode]
-                          ) -> List[RunningNodeState]:
-        return list(self._executor.map(RunningNode.load_node_state, nodes))
+    def load_nodes_states(self, nodes: List[RaftClusterNode]
+                          ) -> List[RaftNodeState]:
+        return list(self._executor.map(RaftClusterNode.load_node_state, nodes))
 
 
 def _exhaust(iterator: Iterator) -> None:
@@ -250,4 +247,4 @@ def _exhaust(iterator: Iterator) -> None:
           maxlen=0)
 
 
-TestCluster = Cluster.TestCase
+TestCluster = RaftNetwork.TestCase

@@ -9,7 +9,7 @@ from consensual.raft import (NodeId,
                              Term)
 
 
-class RunningNodeState:
+class RaftNodeState:
     def __init__(self,
                  _id: NodeId,
                  *,
