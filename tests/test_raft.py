@@ -109,8 +109,9 @@ class RaftNetwork(RuleBasedStateMachine):
             'running_nodes_with_log_arguments')
     shutdown_nodes = Bundle('shutdown_nodes')
 
-    @rule(source_nodes=running_nodes,
-          target_nodes=running_nodes)
+    @rule(target=running_nodes,
+          source_nodes=consumes(running_nodes),
+          target_nodes=consumes(running_nodes))
     def add_nodes(self,
                   target_nodes: List[RaftClusterNode],
                   source_nodes: List[RaftClusterNode]
@@ -131,6 +132,7 @@ class RaftNetwork(RuleBasedStateMachine):
                    in zip(target_clusters_states_before,
                           target_nodes_states_before,
                           source_nodes_states_before, errors))
+        return multiple(source_nodes, target_nodes)
 
     @rule(target=running_nodes_with_log_arguments,
           data=strategies.data,

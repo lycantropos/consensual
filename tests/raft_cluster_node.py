@@ -70,6 +70,7 @@ class RaftClusterNode:
             process = self._process
             process.start()
             self._event.wait()
+            del self._event
             time.sleep(1)
             if not process.is_alive():
                 del candidates[index]
@@ -149,6 +150,8 @@ class RaftClusterNode:
                 args=(self.url, self.processors, self.heartbeat,
                       self.random_seed, self._event))
         self._process.start()
+        self._event.wait()
+        del self._event
 
     def stop(self) -> None:
         self._session.close()
