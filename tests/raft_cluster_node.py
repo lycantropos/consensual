@@ -202,7 +202,7 @@ def _run_node(url: URL,
                          logger=to_logger(url.authority),
                          processors=processors)
     node._app.middlewares.append(to_latency_simulator(
-            max_delay=heartbeat / MAX_RUNNING_NODES_COUNT,
+            max_delay=heartbeat / (2 * MAX_RUNNING_NODES_COUNT),
             random_seed=random_seed))
     return node.run()
 
