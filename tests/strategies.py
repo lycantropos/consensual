@@ -36,11 +36,16 @@ def waiting_processor(node: Node, parameters: float) -> None:
     time.sleep(parameters)
 
 
-paths_letters = strategies.sampled_from(string.digits + string.ascii_letters
-                                        + string.whitespace
-                                        + '!"#$%&\'()*+,-./:;<=>?@[\\]^_`|~')
-paths = (strategies.text(paths_letters,
-                         min_size=1)
+short_paths_letters = strategies.sampled_from(string.digits
+                                              + string.ascii_letters)
+long_paths_letters = (
+        short_paths_letters
+        | strategies.sampled_from(string.whitespace
+                                  + '!"#$&\'()*+,-./:;<=>?@[\\]^_`|~'))
+paths = ((strategies.text(short_paths_letters,
+                          min_size=1)
+          | strategies.text(long_paths_letters,
+                            min_size=2))
          .map('/{}'.format))
 processors_parameters = {waiting_processor: strategies.floats(-10, 10)}
 processors = strategies.sampled_from(list(processors_parameters))
