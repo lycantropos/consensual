@@ -26,6 +26,7 @@ from consensual.raft import (ClusterId,
                              Role)
 from .raft_cluster_state import RaftClusterState
 from .raft_node_state import RaftNodeState
+from .utils import MAX_RUNNING_NODES_COUNT
 
 
 class RaftClusterNode:
@@ -205,8 +206,9 @@ def _run_node(url: URL,
                          heartbeat=heartbeat,
                          logger=to_logger(url.authority),
                          processors=processors)
-    node._app.middlewares.append(to_latency_simulator(max_delay=heartbeat,
-                                                      random_seed=random_seed))
+    node._app.middlewares.append(to_latency_simulator(
+            max_delay=heartbeat / MAX_RUNNING_NODES_COUNT,
+            random_seed=random_seed))
     return node.run()
 
 
@@ -222,11 +224,11 @@ def to_latency_simulator(*,
                          handler: Handler,
                          generate_uniform: Callable[[float, float], float]
                          = Random(random_seed).uniform,
-                         step_max_delay: float = 3 * max_delay / 4
+                         half_max_delay: float = max_delay / 2
                          ) -> web.StreamResponse:
-        await asyncio.sleep(generate_uniform(0, step_max_delay))
+        await asyncio.sleep(generate_uniform(0, half_max_delay))
         result = await handler(request)
-        await asyncio.sleep(generate_uniform(0, step_max_delay))
+        await asyncio.sleep(generate_uniform(0, half_max_delay))
         return result
 
     return middleware

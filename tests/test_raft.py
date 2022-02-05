@@ -193,9 +193,10 @@ class RaftNetwork(RuleBasedStateMachine):
     def log(self,
             nodes_with_arguments
             : Tuple[List[RaftClusterNode], List[str], List[Any]]) -> None:
+        nodes, *rest_arguments = nodes_with_arguments
         nodes_states_before = self.load_nodes_states(nodes)
-        errors = list(self._executor.map(RaftClusterNode.log,
-                                         *nodes_with_arguments))
+        errors = list(self._executor.map(RaftClusterNode.log, nodes,
+                                         *rest_arguments))
         assert all(equivalence(error is None,
                                node_state_before.leader_node_id is not None)
                    for node_state_before, error in zip(nodes_states_before,
