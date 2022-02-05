@@ -1,6 +1,5 @@
 import string
 import time
-import urllib.parse
 from typing import (Any,
                     List,
                     Sequence,
@@ -59,8 +58,7 @@ def to_nodes_with_log_arguments(
         node_with_path: Tuple[RaftClusterNode, str]
 ) -> SearchStrategy[Tuple[RaftClusterNode, str, Any]]:
     node, path = node_with_path
-    return strategies.tuples(strategies.just(node),
-                             strategies.just(urllib.parse.quote(path)),
+    return strategies.tuples(strategies.just(node), strategies.just(path),
                              processors_parameters[node.processors[path]])
 
 
