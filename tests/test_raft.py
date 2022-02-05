@@ -112,8 +112,8 @@ class RaftNetwork(RuleBasedStateMachine):
           target_nodes=running_nodes)
     def add_nodes(self,
                   target_nodes: List[RaftClusterNode],
-                  source_nodes: List[RaftClusterNode]) -> List[
-        RaftClusterNode]:
+                  source_nodes: List[RaftClusterNode]
+                  ) -> List[RaftClusterNode]:
         source_nodes = source_nodes[:len(target_nodes)]
         source_nodes_states_before = self.load_nodes_states(source_nodes)
         target_clusters_states_before = self.load_clusters_states(target_nodes)
@@ -203,16 +203,16 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @rule(target=running_nodes,
           nodes=consumes(shutdown_nodes))
-    def restart_nodes(self, nodes: List[RaftClusterNode]) -> List[
-        RaftClusterNode]:
+    def restart_nodes(self, nodes: List[RaftClusterNode]
+                      ) -> List[RaftClusterNode]:
         _exhaust(self._executor.map(RaftClusterNode.start, nodes))
         self._nodes += nodes
         return nodes
 
     @rule(target=shutdown_nodes,
           nodes=consumes(running_nodes))
-    def shutdown_nodes(self, nodes: List[RaftClusterNode]) -> List[
-        RaftClusterNode]:
+    def shutdown_nodes(self, nodes: List[RaftClusterNode]
+                       ) -> List[RaftClusterNode]:
         _exhaust(self._executor.map(RaftClusterNode.stop, nodes))
         shutdown_nodes = frozenset(nodes)
         self._nodes = [node
