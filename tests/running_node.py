@@ -1,14 +1,19 @@
+import asyncio
 import logging.config
 import multiprocessing
+import random
 import socket
 import sys
 import time
 from typing import (Any,
+                    Awaitable,
+                    Callable,
                     Dict,
                     Optional,
                     Tuple)
 
 import requests
+from aiohttp import web
 from reprit.base import generate_repr
 from requests import (Response,
                       Session)
@@ -26,14 +31,14 @@ from .running_node_state import RunningNodeState
 class RunningNode:
     def __init__(self,
                  url: URL,
-                 processors: Optional[Dict[str, Processor]],
+                 processors: Dict[str, Processor],
+                 random_seed: int,
                  *,
                  heartbeat: float) -> None:
-        self.heartbeat, self.processors, self.url = (
-            heartbeat, {} if processors is None else processors, url,
+        self.heartbeat, self.processors, self.random_seed, self.url = (
+            heartbeat, processors, random_seed, url,
         )
         self._url_string = str(url)
-        assert not is_url_reachable(self.url)
         self._process: Optional[multiprocessing.Process] = None
         self._session = Session()
 
@@ -56,8 +61,7 @@ class RunningNode:
     def initialize(self) -> None:
         assert requests.post(self._url_string).ok
 
-    def log(self, path_with_parameters: Tuple[str, Any]) -> None:
-        path, parameters = path_with_parameters
+    def log(self, path: str, parameters: Any) -> None:
         response = requests.post(str(self.url.with_path(path)),
                                  json=parameters)
         response.raise_for_status()
@@ -105,7 +109,8 @@ class RunningNode:
     def start(self) -> None:
         self._process = multiprocessing.Process(
                 target=_run_node,
-                args=(self.url, self.processors, self.heartbeat))
+                args=(self.url, self.processors, self.heartbeat,
+                      self.random_seed))
         self._process.start()
 
     def stop(self) -> None:
@@ -165,9 +170,33 @@ def to_logger(name: str,
 
 def _run_node(url: URL,
               processors: Dict[str, Processor],
-              heartbeat: float) -> None:
+              heartbeat: float,
+              random_seed: int) -> None:
     node = Node.from_url(url,
                          heartbeat=heartbeat,
                          logger=to_logger(url.authority),
                          processors=processors)
+    node._app.middlewares.append(to_simulate_latency_middleware(
+            random_seed=random_seed,
+            heartbeat=heartbeat))
     return node.run()
+
+
+Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
+Middleware = Callable[[web.Request, Handler], Awaitable[web.StreamResponse]]
+
+
+def to_simulate_latency_middleware(*,
+                                   random_seed: int,
+                                   heartbeat: float) -> Middleware:
+    to_random_uniform = random.Random(random_seed).uniform
+
+    @web.middleware
+    async def middleware(request: web.Request,
+                         handler: Handler) -> web.StreamResponse:
+        await asyncio.sleep(to_random_uniform(0, heartbeat))
+        result = await handler(request)
+        await asyncio.sleep(to_random_uniform(0, heartbeat))
+        return result
+
+    return middleware

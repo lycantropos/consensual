@@ -18,6 +18,7 @@ from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
                                  consumes,
                                  invariant,
+                                 multiple,
                                  precondition,
                                  rule)
 from yarl import URL
@@ -30,7 +31,8 @@ from .running_node import RunningNode
 from .running_node_state import RunningNodeState
 from .utils import (MAX_RUNNING_NODES_COUNT,
                     equivalence,
-                    implication)
+                    implication,
+                    transpose)
 
 
 class Cluster(RuleBasedStateMachine):
@@ -106,7 +108,8 @@ class Cluster(RuleBasedStateMachine):
                    for node_id, new_term in new_terms.items())
 
     running_nodes = Bundle('running_nodes')
-    running_nodes_with_parameters = Bundle('running_nodes_with_parameters')
+    running_nodes_with_log_arguments = Bundle(
+            'running_nodes_with_log_arguments')
     shutdown_nodes = Bundle('shutdown_nodes')
 
     @rule(source_nodes=running_nodes,
@@ -131,36 +134,38 @@ class Cluster(RuleBasedStateMachine):
                           target_nodes_states_before,
                           source_nodes_states_before, errors))
 
-    @rule(target=running_nodes_with_parameters,
-          nodes_with_parameters=consumes(running_nodes).flatmap(
-                  strategies.nodes_to_nodes_with_parameters_strategies))
-    def attach_parameters(self,
-                          nodes_with_parameters
-                          : Tuple[List[RunningNode], List[Tuple[str, Any]]]
-                          ) -> Tuple[List[RunningNode], List[Tuple[str, Any]]]:
-        return nodes_with_parameters
+    @rule(target=running_nodes_with_log_arguments,
+          nodes_with_log_arguments=running_nodes.flatmap(
+                  strategies.to_nodes_with_log_arguments_lists))
+    def attach_log_arguments(self,
+                             nodes_with_log_arguments
+                             : List[Tuple[RunningNode, str, Any]]
+                             ) -> Tuple[List[RunningNode], List[str],
+                                        List[Any]]:
+        return (transpose(nodes_with_log_arguments)
+                if nodes_with_log_arguments
+                else multiple())
 
     def is_not_full(self) -> bool:
         return len(self._urls) < MAX_RUNNING_NODES_COUNT
 
     @precondition(is_not_full)
     @rule(target=running_nodes,
-          processors=strategies.processors_dicts_lists,
           heartbeat=strategies.heartbeats,
-          urls=strategies.cluster_urls_lists)
+          nodes_parameters=strategies.running_nodes_parameters_lists)
     def create_nodes(self,
                      heartbeat: float,
-                     processors: List[Dict[str, Processor]],
-                     urls: List[URL]) -> List[RunningNode]:
-        max_new_nodes_count = MAX_RUNNING_NODES_COUNT - len(self._urls)
-        new_urls = list(set(urls) - self._urls)[:max_new_nodes_count]
-        extra_processors_count = len(new_urls) - len(processors)
+                     nodes_parameters
+                     : List[Tuple[URL, Dict[str, Processor], int]]
+                     ) -> List[RunningNode]:
+        new_nodes_parameters = [
+                                   node_parameters
+                                   for node_parameters in nodes_parameters
+                                   if node_parameters[0] not in self._urls
+                               ][:MAX_RUNNING_NODES_COUNT - len(self._urls)]
         nodes = list(self._executor.map(partial(RunningNode,
                                                 heartbeat=heartbeat),
-                                        new_urls,
-                                        chain(processors,
-                                              repeat(None,
-                                                     extra_processors_count))))
+                                        *transpose(new_nodes_parameters)))
         _exhaust(self._executor.map(RunningNode.start, nodes))
         self._urls.update(new_urls)
         self._nodes.extend(nodes)
@@ -190,13 +195,13 @@ class Cluster(RuleBasedStateMachine):
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
-    @rule(nodes_with_parameters=running_nodes_with_parameters)
+    @rule(nodes_with_arguments=running_nodes_with_log_arguments)
     def log(self,
-            nodes_with_parameters: Tuple[List[RunningNode],
-                                         List[Tuple[str, Any]]]) -> None:
-        nodes, parameters = nodes_with_parameters
+            nodes_with_arguments
+            : Tuple[List[RunningNode], List[str], List[Any]]) -> None:
         nodes_states_before = self.load_nodes_states(nodes)
-        errors = list(self._executor.map(RunningNode.log, nodes, parameters))
+        errors = list(self._executor.map(RunningNode.log,
+                                         *nodes_with_arguments))
         assert all(equivalence(error is None,
                                node_state_before.leader_node_id is not None)
                    for node_state_before, error in zip(nodes_states_before,
