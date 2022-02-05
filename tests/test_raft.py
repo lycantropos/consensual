@@ -171,7 +171,7 @@ class RaftNetwork(RuleBasedStateMachine):
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
-    @rule(data=strategies.data,
+    @rule(data=strategies.data_objects,
           nodes=running_nodes)
     def log(self, data: DataObject, nodes: List[RaftClusterNode]) -> None:
         arguments = data.draw(

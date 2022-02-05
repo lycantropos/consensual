@@ -12,7 +12,7 @@ from consensual.raft import Node
 from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_RUNNING_NODES_COUNT
 
-data = strategies.data()
+data_objects = strategies.data()
 heartbeats = strategies.floats(1, 2)
 delays = strategies.floats(0, 1)
 hosts = strategies.just('localhost')
