@@ -39,7 +39,8 @@ def waiting_processor(node: Node, parameters: float) -> None:
 
 plain_paths_letters = strategies.sampled_from(string.digits
                                               + string.ascii_letters)
-paths_infixes_letters = plain_paths_letters | strategies.sampled_from(' -./_~')
+paths_infixes_letters = plain_paths_letters | strategies.sampled_from(
+        string.whitespace + '!"#$&\'()*+,-./:;<=>?@[\\]^_`|~')
 paths_infixes = strategies.text(paths_infixes_letters,
                                 min_size=1)
 
