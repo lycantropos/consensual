@@ -51,7 +51,7 @@ class RaftNetwork(RuleBasedStateMachine):
         new_commit_lengths = {node_state.id: node_state.commit_length
                               for node_state in new_nodes_states}
         assert all(
-                old_commit_lengths[node_id] <= new_commit_length
+                old_commit_lengths.get(node_id, 0) <= new_commit_length
                 for node_id, new_commit_length in new_commit_lengths.items())
 
     @invariant()
@@ -114,7 +114,7 @@ class RaftNetwork(RuleBasedStateMachine):
                      for node_state in old_nodes_states}
         new_terms = {node_state.id: node_state.term
                      for node_state in new_nodes_states}
-        assert all(old_terms[node_id] <= new_term
+        assert all(old_terms.get(node_id, 0) <= new_term
                    for node_id, new_term in new_terms.items())
 
     running_nodes = Bundle('running_nodes')
