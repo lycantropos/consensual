@@ -441,7 +441,8 @@ class VoteReply:
 
 class Node:
     __slots__ = ('_app', '_cluster_state', '_commands_executor',
-                 '_communication', '_election_duration', '_election_task',
+                 '_commands_processors', '_communication',
+                 '_election_duration', '_election_task',
                  '_last_heartbeat_time', '_logger', '_loop', '_patch_routes',
                  '_processors', '_reelection_lag', '_reelection_task',
                  '_state', '_sync_task', '_url')
@@ -472,7 +473,7 @@ class Node:
         self._cluster_state, self._state = _cluster_state, _state
         self._url = self._cluster_state.nodes_urls[self._state.id]
         self._logger = logging.getLogger() if logger is None else logger
-        self._processors = {} if processors is None else dict(processors)
+        self._processors = {} if processors is None else processors
         self._loop = safe_get_event_loop()
         self._app = web.Application()
         self._commands_executor = ThreadPoolExecutor(max_workers=1)
@@ -500,8 +501,11 @@ class Node:
                                    self._handle_communication)
         for path in self.processors.keys():
             self._app.router.add_post(path, self._handle_record)
-        self._processors[SEPARATE_CLUSTERS_ACTION] = Node._separate_clusters
-        self._processors[STABILIZE_CLUSTER_ACTION] = Node._stabilize_cluster
+        self._commands_processors: Mapping[str, Processor] = MappingProxyType({
+            **self.processors,
+            SEPARATE_CLUSTERS_ACTION: Node._separate_clusters,
+            STABILIZE_CLUSTER_ACTION: Node._stabilize_cluster
+        })
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
@@ -1030,7 +1034,7 @@ class Node:
 
     def _process_commands(self, commands: List[Command]) -> None:
         for command in commands:
-            self.processors[command.action](self, command.parameters)
+            self._commands_processors[command.action](self, command.parameters)
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self._state.id} restarts election timer '
