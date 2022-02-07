@@ -11,6 +11,8 @@ from asyncio import (AbstractEventLoop,
 from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from typing import (Any,
+                    Awaitable,
+                    Callable,
                     Dict,
                     List,
                     Mapping,
@@ -493,6 +495,23 @@ class Node:
             CallPath.UPDATE: (UpdateCall.from_json, self._process_update_call),
             CallPath.VOTE: (VoteCall.from_json, self._process_vote_call),
         }
+
+        @web.middleware
+        async def error_middleware(
+                request: web.Request,
+                handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+        ) -> web.StreamResponse:
+            try:
+                result = await handler(request)
+            except web.HTTPException:
+                raise
+            except Exception:
+                logger.exception('Something unexpected happened:')
+                raise
+            else:
+                return result
+
+        self._app.middlewares.append(error_middleware)
         self._app.router.add_delete('/', self._handle_delete)
         self._app.router.add_get('/cluster', self._handle_get_cluster)
         self._app.router.add_get('/node', self._handle_get_node)
