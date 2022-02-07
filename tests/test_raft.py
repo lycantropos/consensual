@@ -5,8 +5,7 @@ from collections import (Counter,
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from operator import eq
-from typing import (Any,
-                    Dict,
+from typing import (Dict,
                     Iterator,
                     List,
                     Sequence,
@@ -38,53 +37,43 @@ class RaftNetwork(RuleBasedStateMachine):
         super().__init__()
         self._executor = ThreadPoolExecutor()
         self._nodes: List[RaftClusterNode] = []
-        self._cluster_states: List[RaftClusterState] = []
-        self._nodes_states: List[RaftNodeState] = []
+        self._new_cluster_states: List[RaftClusterState] = []
+        self._old_cluster_states: List[RaftClusterState] = []
+        self._new_nodes_states: List[RaftNodeState] = []
+        self._old_nodes_states: List[RaftNodeState] = []
 
     @invariant()
     def commit_length_monotonicity(self) -> None:
-        old_nodes_states = self._nodes_states
-        self.update_states()
-        new_nodes_states = self._nodes_states
         old_commit_lengths = {node_state.id: node_state.commit_length
-                              for node_state in old_nodes_states}
+                              for node_state in self._old_nodes_states}
         new_commit_lengths = {node_state.id: node_state.commit_length
-                              for node_state in new_nodes_states}
+                              for node_state in self._new_nodes_states}
         assert all(
                 old_commit_lengths.get(node_id, 0) <= new_commit_length
                 for node_id, new_commit_length in new_commit_lengths.items())
 
     @invariant()
     def leader_append_only(self) -> None:
-        old_nodes_states = self._nodes_states
-        self.update_states()
-        new_nodes_states = self._nodes_states
         assert all(implication(new_state.role is Role.LEADER,
                                len(new_state.log) >= len(old_state.log)
                                and all(map(eq, new_state.log, old_state.log)))
-                   for old_state, new_state in zip(old_nodes_states,
-                                                   new_nodes_states))
+                   for old_state, new_state in zip(self._old_nodes_states,
+                                                   self._new_nodes_states))
 
     @invariant()
     def leader_completeness(self) -> None:
-        old_nodes_states = self._nodes_states
-        self.update_states()
-        new_nodes_states = self._nodes_states
         assert all(
                 implication(new_state.role is Role.LEADER,
                             all(map(eq,
                                     new_state.log[:old_state.commit_length],
                                     old_state.log[:old_state.commit_length])))
-                for old_state, new_state in zip(old_nodes_states,
-                                                new_nodes_states))
+                for old_state, new_state in zip(self._old_nodes_states,
+                                                self._new_nodes_states))
 
     @invariant()
     def log_matching(self) -> None:
-        self.update_states()
-        clusters_states = self._cluster_states
-        nodes_states = self._nodes_states
         same_records = defaultdict(list)
-        for node_state in nodes_states:
+        for node_state in self._new_nodes_states:
             for index, record in enumerate(node_state.log):
                 (same_records[(index, record.term, record.cluster_id)]
                  .append(record))
@@ -93,10 +82,9 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def election_safety(self) -> None:
-        self.update_states()
         clusters_leaders_counts = defaultdict(Counter)
-        for cluster_state, node_state in zip(self._cluster_states,
-                                             self._nodes_states):
+        for cluster_state, node_state in zip(self._new_cluster_states,
+                                             self._new_nodes_states):
             clusters_leaders_counts[cluster_state.id][node_state.term] += (
                     node_state.role is Role.LEADER
             )
@@ -107,13 +95,10 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def term_monotonicity(self) -> None:
-        old_nodes_states = self._nodes_states
-        self.update_states()
-        new_nodes_states = self._nodes_states
         old_terms = {node_state.id: node_state.term
-                     for node_state in old_nodes_states}
+                     for node_state in self._old_nodes_states}
         new_terms = {node_state.id: node_state.term
-                     for node_state in new_nodes_states}
+                     for node_state in self._new_nodes_states}
         assert all(old_terms.get(node_id, 0) <= new_term
                    for node_id, new_term in new_terms.items())
 
@@ -133,6 +118,7 @@ class RaftNetwork(RuleBasedStateMachine):
         target_nodes_states_before = self.load_nodes_states(target_nodes)
         errors = list(self._executor.map(RaftClusterNode.add, target_nodes,
                                          source_nodes))
+        self.update_states()
         assert all(equivalence(error is None,
                                target_cluster_state.stable
                                and target_node_state.leader_node_id is not None
@@ -164,8 +150,8 @@ class RaftNetwork(RuleBasedStateMachine):
                         heartbeat=heartbeat),
                 range(len(nodes_parameters)),
                 *transpose(nodes_parameters)))
-        self._nodes.extend(nodes)
         self.update_states()
+        self._nodes.extend(nodes)
         return nodes
 
     @rule(nodes=running_nodes)
@@ -173,6 +159,7 @@ class RaftNetwork(RuleBasedStateMachine):
         clusters_states_before = self.load_clusters_states(nodes)
         nodes_states_before = self.load_nodes_states(nodes)
         errors = list(self._executor.map(RaftClusterNode.delete, nodes))
+        self.update_states()
         assert all(equivalence(error is None,
                                cluster_state.stable
                                and node_state.leader_node_id is not None)
@@ -182,6 +169,7 @@ class RaftNetwork(RuleBasedStateMachine):
     @rule(nodes=running_nodes)
     def initialize_nodes(self, nodes: List[RaftClusterNode]) -> None:
         _exhaust(self._executor.map(RaftClusterNode.initialize, nodes))
+        self.update_states()
         clusters_states_after = self.load_clusters_states(nodes)
         assert all(cluster_state.id for cluster_state in clusters_states_after)
 
@@ -198,6 +186,7 @@ class RaftNetwork(RuleBasedStateMachine):
         nodes_states_before = self.load_nodes_states(nodes)
         errors = list(self._executor.map(RaftClusterNode.log, nodes,
                                          *rest_arguments))
+        self.update_states()
         assert all(equivalence(error is None,
                                node_state_before.leader_node_id is not None)
                    for node_state_before, error in zip(nodes_states_before,
@@ -208,6 +197,7 @@ class RaftNetwork(RuleBasedStateMachine):
     def restart_nodes(self, nodes: List[RaftClusterNode]
                       ) -> List[RaftClusterNode]:
         _exhaust(self._executor.map(RaftClusterNode.restart, nodes))
+        self.update_states()
         self._nodes += nodes
         return nodes
 
@@ -220,6 +210,7 @@ class RaftNetwork(RuleBasedStateMachine):
         self._nodes = [node
                        for node in self._nodes
                        if node not in shutdown_nodes]
+        self.update_states()
         return nodes
 
     def is_not_empty(self) -> bool:
@@ -227,16 +218,20 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @precondition(is_not_empty)
     @rule(delay=strategies.delays)
-    def wait(self, delay: float) -> None:
+    def stand_idle(self, delay: float) -> None:
         time.sleep(delay)
+        self.update_states()
 
     def teardown(self) -> None:
         _exhaust(self._executor.map(RaftClusterNode.stop, self._nodes))
         self._executor.shutdown()
 
     def update_states(self) -> None:
-        self._cluster_states = self.load_clusters_states(self._nodes)
-        self._nodes_states = self.load_nodes_states(self._nodes)
+        self._old_cluster_states, self._old_nodes_states = (
+            self._new_cluster_states, self._new_nodes_states
+        )
+        self._new_cluster_states = self.load_clusters_states(self._nodes)
+        self._new_nodes_states = self.load_nodes_states(self._nodes)
 
     def load_clusters_states(self, nodes: List[RaftClusterNode]
                              ) -> List[RaftClusterState]:
