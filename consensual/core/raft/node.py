@@ -252,45 +252,78 @@ class SyncReply:
 
 
 class UpdateCall:
-    __slots__ = '_cluster_state',
+    __slots__ = '_cluster_id', '_cluster_state', '_node_id'
 
-    def __new__(cls, cluster_state: StableClusterState) -> 'UpdateCall':
+    def __new__(cls,
+                *,
+                cluster_id: ClusterId,
+                cluster_state: StableClusterState,
+                node_id: NodeId) -> 'UpdateCall':
         self = super().__new__(cls)
-        self._cluster_state = cluster_state
+        self._cluster_id, self._cluster_state, self._node_id = (
+            cluster_id, cluster_state, node_id
+        )
         return self
 
     __repr__ = generate_repr(__new__)
+
+    @property
+    def cluster_id(self) -> ClusterId:
+        return self._cluster_id
 
     @property
     def cluster_state(self) -> StableClusterState:
         return self._cluster_state
 
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
     @classmethod
-    def from_json(cls, cluster_state: Dict[str, Any]) -> 'UpdateCall':
-        return cls(StableClusterState.from_json(**cluster_state))
+    def from_json(cls,
+                  *,
+                  cluster_id: RawClusterId,
+                  cluster_state: Dict[str, Any],
+                  node_id: NodeId) -> 'UpdateCall':
+        return cls(cluster_id=ClusterId.from_json(cluster_id),
+                   cluster_state=StableClusterState.from_json(**cluster_state),
+                   node_id=node_id)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'cluster_state': self.cluster_state.as_json()}
+        return {'cluster_id': self.cluster_id.as_json(),
+                'cluster_state': self.cluster_state.as_json(),
+                'node_id': self.node_id}
+
+
+class UpdateStatus(enum.IntEnum):
+    CONFLICTS = enum.auto()
+    REJECTED = enum.auto()
+    SUCCEED = enum.auto()
+    UNAVAILABLE = enum.auto()
+    UNGOVERNABLE = enum.auto()
+    UNSTABLE = enum.auto()
 
 
 class UpdateReply:
-    __slots__ = '_error',
+    __slots__ = '_status',
 
-    def __new__(cls, error: Optional[str]) -> 'UpdateReply':
+    def __new__(cls, status: UpdateStatus) -> 'UpdateReply':
         self = super().__new__(cls)
-        self._error = error
+        self._status = status
         return self
 
     __repr__ = generate_repr(__new__)
 
     @property
-    def error(self) -> Optional[str]:
-        return self._error
+    def status(self) -> UpdateStatus:
+        return self._status
 
-    from_json = classmethod(__new__)
+    @classmethod
+    def from_json(cls, status: int) -> 'UpdateReply':
+        return cls(UpdateStatus(status))
 
     def as_json(self) -> Dict[str, Any]:
-        return {'error': self.error}
+        return {'status': int(self.status)}
 
 
 class VoteCall:
@@ -522,11 +555,12 @@ class Node:
             nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
                                      - set(self._cluster_state.nodes_ids))
             if nonexistent_nodes_ids:
-                reply = UpdateReply(
-                        error
-                        =('nonexistent node(s) found: {nodes_ids}'
-                          .format(nodes_ids=', '.join(nonexistent_nodes_ids))))
-                return web.json_response(reply.as_json())
+                result = {
+                    'error':
+                        ('nonexistent node(s) found: {nodes_ids}'
+                         .format(nodes_ids=', '.join(nonexistent_nodes_ids)))
+                }
+                return web.json_response(result)
             self.logger.debug(
                     ('{id} initializes removal of {nodes_ids}'
                      .format(id=self._state.id,
@@ -537,13 +571,16 @@ class Node:
             self.logger.debug(f'{self._state.id} gets removed')
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
             del rest_nodes_urls[self._state.id]
-        call = UpdateCall(
-                StableClusterState(generate_cluster_id(),
-                                   heartbeat=self._cluster_state.heartbeat,
-                                   nodes_urls=rest_nodes_urls)
-        )
+        call = UpdateCall(cluster_id=self._cluster_state.id,
+                          cluster_state=StableClusterState(
+                                  generate_cluster_id(),
+                                  heartbeat=self._cluster_state.heartbeat,
+                                  nodes_urls=rest_nodes_urls
+                          ),
+                          node_id=self._state.id)
         reply = await self._process_update_call(call)
-        return web.json_response(reply.as_json())
+        result = {'error': update_status_to_error_message(reply.status)}
+        return web.json_response(result)
 
     async def _handle_get_cluster(self, request: web.Request) -> web.Response:
         cluster_state_json = {
@@ -578,21 +615,28 @@ class Node:
             existing_nodes_ids = (nodes_urls_to_add.keys()
                                   & set(self._cluster_state.nodes_ids))
             if existing_nodes_ids:
-                reply = UpdateReply(
-                        error
-                        =('already existing node(s) found: {nodes_ids}'
-                          .format(nodes_ids=', '.join(existing_nodes_ids))))
-                return web.json_response(reply.as_json())
+                result = {
+                    'error':
+                        ('already existing node(s) found: {nodes_ids}'
+                         .format(nodes_ids=', '.join(existing_nodes_ids)))
+                }
+                return web.json_response(result)
             self.logger.debug('{id} initializes adding of {nodes_ids}'
                               .format(id=self._state.id,
                                       nodes_ids=', '.join(nodes_urls_to_add)))
-            call = UpdateCall(StableClusterState(
-                    generate_cluster_id(),
-                    heartbeat=self._cluster_state.heartbeat,
-                    nodes_urls=unite_mappings(self._cluster_state.nodes_urls,
-                                              nodes_urls_to_add)))
+            call = UpdateCall(cluster_id=self._cluster_state.id,
+                              cluster_state=StableClusterState(
+                                      generate_cluster_id(),
+                                      heartbeat=self._cluster_state.heartbeat,
+                                      nodes_urls=unite_mappings(
+                                              self._cluster_state.nodes_urls,
+                                              nodes_urls_to_add
+                                      )
+                              ),
+                              node_id=self._state.id)
             reply = await self._process_update_call(call)
-            return web.json_response(reply.as_json())
+            result = {'error': update_status_to_error_message(reply.status)}
+            return web.json_response(result)
         else:
             self._solo()
             return web.HTTPOk()
@@ -733,7 +777,7 @@ class Node:
     async def _process_update_call(self, call: UpdateCall) -> UpdateReply:
         self.logger.debug(f'{self._state.id} processes {call}')
         if self._state.leader_node_id is None:
-            return UpdateReply(error=f'{self._state.id} has no leader')
+            return UpdateReply(status=UpdateStatus.UNGOVERNABLE)
         elif self._state.role is not Role.LEADER:
             try:
                 raw_reply = await asyncio.wait_for(
@@ -741,17 +785,20 @@ class Node:
                                         CallPath.UPDATE, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
-            except (asyncio.TimeoutError, ClientError, OSError) as exception:
-                return UpdateReply(error=format_exception(exception))
+            except (asyncio.TimeoutError, ClientError, OSError):
+                return UpdateReply(status=UpdateStatus.UNAVAILABLE)
             else:
                 return UpdateReply.from_json(**raw_reply)
+        elif not self._cluster_state.id.agrees_with(call.cluster_id):
+            return UpdateReply(status=UpdateStatus.CONFLICTS)
         elif not self._cluster_state.stable:
-            return UpdateReply(error='Cluster is currently '
-                                     'in transitional state.')
+            return UpdateReply(status=UpdateStatus.UNSTABLE)
+        elif call.node_id not in self._cluster_state.nodes_ids:
+            return UpdateReply(status=UpdateStatus.REJECTED)
         elif (len(self._cluster_state.nodes_ids) == 1
               and not call.cluster_state.nodes_ids):
             self._delete()
-            return UpdateReply(error=None)
+            return UpdateReply(status=UpdateStatus.SUCCEED)
         next_cluster_state = TransitionalClusterState(old=self._cluster_state,
                                                       new=call.cluster_state)
         command = Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
@@ -762,7 +809,7 @@ class Node:
                              term=self._state.term))
         self._update_cluster_state(next_cluster_state)
         self._restart_sync_timer()
-        return UpdateReply(error=None)
+        return UpdateReply(status=UpdateStatus.SUCCEED)
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self._state.id} processes {call}')
@@ -1082,3 +1129,19 @@ def generate_cluster_id() -> ClusterId:
 
 def node_url_to_id(url: URL) -> NodeId:
     return f'{host_to_ip_address(url.host)}:{url.port}'
+
+
+def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:
+    if status is UpdateStatus.CONFLICTS:
+        return 'node does not belong to cluster'
+    elif status is UpdateStatus.UNGOVERNABLE:
+        return 'node has no leader'
+    elif status is UpdateStatus.REJECTED:
+        return 'node does not belong to cluster'
+    elif status is UpdateStatus.UNAVAILABLE:
+        return 'leader is unavailable'
+    elif status is UpdateStatus.UNSTABLE:
+        return 'cluster is in unstable mode'
+    else:
+        assert status is UpdateStatus.SUCCEED, f'unknown status: {status!r}'
+        return None
