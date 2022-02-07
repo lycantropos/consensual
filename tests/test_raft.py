@@ -162,6 +162,7 @@ class RaftNetwork(RuleBasedStateMachine):
         nodes = list(self._executor.map(
                 partial(RaftClusterNode.running_from_one_of_ports,
                         heartbeat=heartbeat),
+                range(len(nodes_parameters)),
                 *transpose(nodes_parameters)))
         self._nodes.extend(nodes)
         self.update_states()

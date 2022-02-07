@@ -31,13 +31,14 @@ from .utils import MAX_RUNNING_NODES_COUNT
 
 class RaftClusterNode:
     def __init__(self,
+                 index: int,
                  url: URL,
                  processors: Dict[str, Processor],
                  random_seed: int,
                  *,
                  heartbeat: float) -> None:
-        self.heartbeat, self.processors, self.random_seed, self.url = (
-            heartbeat, processors, random_seed, url,
+        self.index, self.heartbeat, self.processors, self.random_seed, self.url = (
+            index, heartbeat, processors, random_seed, url,
         )
         self._url_string = str(url)
         self._event = multiprocessing.Event()
@@ -51,6 +52,7 @@ class RaftClusterNode:
 
     @classmethod
     def running_from_one_of_ports(cls,
+                                  index: int,
                                   host: str,
                                   ports: Sequence[int],
                                   processors: Dict[str, Processor],
@@ -60,12 +62,12 @@ class RaftClusterNode:
         candidates = list(ports)
         generate_index = Random(random_seed).randrange
         while candidates:
-            index = generate_index(0, len(candidates))
-            candidate = candidates[index]
+            candidate_index = generate_index(0, len(candidates))
+            candidate = candidates[candidate_index]
             url = URL.build(scheme='http',
                             host=host,
                             port=candidate)
-            self = cls(url, processors, random_seed,
+            self = cls(index, url, processors, random_seed,
                        heartbeat=heartbeat)
             process = self._process
             process.start()
@@ -73,7 +75,7 @@ class RaftClusterNode:
             del self._event
             time.sleep(1)
             if not process.is_alive():
-                del candidates[index]
+                del candidates[candidate_index]
                 continue
             break
         else:
