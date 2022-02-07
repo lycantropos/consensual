@@ -25,9 +25,9 @@ from yarl import URL
 
 from .cluster_id import (ClusterId,
                          RawClusterId)
-from .cluster_state import (AnyClusterState,
-                            StableClusterState,
-                            TransitionalClusterState)
+from .cluster_state import (ClusterState,
+                            DisjointClusterState,
+                            JointClusterState)
 from .command import Command
 from .communication import (Communication,
                             update_communication_registry)
@@ -49,12 +49,12 @@ from .utils import (format_exception,
                     subtract_mapping,
                     unite_mappings)
 
-START_CLUSTER_STATE_UPDATE_ACTION = '0'
-END_CLUSTER_STATE_UPDATE_ACTION = '1'
-assert (START_CLUSTER_STATE_UPDATE_ACTION
-        and not START_CLUSTER_STATE_UPDATE_ACTION.startswith('/'))
-assert (END_CLUSTER_STATE_UPDATE_ACTION
-        and not END_CLUSTER_STATE_UPDATE_ACTION.startswith('/'))
+SEPARATE_CLUSTERS_ACTION = '0'
+STABILIZE_CLUSTER_ACTION = '1'
+assert (SEPARATE_CLUSTERS_ACTION
+        and not SEPARATE_CLUSTERS_ACTION.startswith('/'))
+assert (STABILIZE_CLUSTER_ACTION
+        and not STABILIZE_CLUSTER_ACTION.startswith('/'))
 
 
 class Call(Protocol):
@@ -257,7 +257,7 @@ class UpdateCall:
     def __new__(cls,
                 *,
                 cluster_id: ClusterId,
-                cluster_state: StableClusterState,
+                cluster_state: DisjointClusterState,
                 node_id: NodeId) -> 'UpdateCall':
         self = super().__new__(cls)
         self._cluster_id, self._cluster_state, self._node_id = (
@@ -272,7 +272,7 @@ class UpdateCall:
         return self._cluster_id
 
     @property
-    def cluster_state(self) -> StableClusterState:
+    def cluster_state(self) -> DisjointClusterState:
         return self._cluster_state
 
     @property
@@ -286,7 +286,8 @@ class UpdateCall:
                   cluster_state: Dict[str, Any],
                   node_id: NodeId) -> 'UpdateCall':
         return cls(cluster_id=ClusterId.from_json(cluster_id),
-                   cluster_state=StableClusterState.from_json(**cluster_state),
+                   cluster_state=DisjointClusterState.from_json(
+                           **cluster_state),
                    node_id=node_id)
 
     def as_json(self) -> Dict[str, Any]:
@@ -455,15 +456,16 @@ class Node:
                  ) -> 'Node':
         id_ = node_url_to_id(url)
         return cls(NodeState(id_),
-                   StableClusterState(ClusterId(),
-                                      heartbeat=heartbeat,
-                                      nodes_urls={id_: url}),
+                   DisjointClusterState(ClusterId(),
+                                        heartbeat=heartbeat,
+                                        nodes_urls={id_: url},
+                                        stable=False),
                    logger=logger,
                    processors=processors)
 
     def __init__(self,
                  _state: NodeState,
-                 _cluster_state: AnyClusterState,
+                 _cluster_state: ClusterState,
                  *,
                  logger: Optional[logging.Logger] = None,
                  processors: Optional[Mapping[str, Processor]] = None) -> None:
@@ -498,10 +500,8 @@ class Node:
                                    self._handle_communication)
         for path in self.processors.keys():
             self._app.router.add_post(path, self._handle_record)
-        self._processors[START_CLUSTER_STATE_UPDATE_ACTION] = (
-            Node._start_cluster_state_update)
-        self._processors[END_CLUSTER_STATE_UPDATE_ACTION] = (
-            Node._end_cluster_state_update)
+        self._processors[SEPARATE_CLUSTERS_ACTION] = Node._separate_clusters
+        self._processors[STABILIZE_CLUSTER_ACTION] = Node._stabilize_cluster
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
@@ -572,10 +572,11 @@ class Node:
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
             del rest_nodes_urls[self._state.id]
         call = UpdateCall(cluster_id=self._cluster_state.id,
-                          cluster_state=StableClusterState(
+                          cluster_state=DisjointClusterState(
                                   generate_cluster_id(),
                                   heartbeat=self._cluster_state.heartbeat,
-                                  nodes_urls=rest_nodes_urls
+                                  nodes_urls=rest_nodes_urls,
+                                  stable=False
                           ),
                           node_id=self._state.id)
         reply = await self._process_update_call(call)
@@ -625,13 +626,14 @@ class Node:
                               .format(id=self._state.id,
                                       nodes_ids=', '.join(nodes_urls_to_add)))
             call = UpdateCall(cluster_id=self._cluster_state.id,
-                              cluster_state=StableClusterState(
+                              cluster_state=DisjointClusterState(
                                       generate_cluster_id(),
                                       heartbeat=self._cluster_state.heartbeat,
                                       nodes_urls=unite_mappings(
                                               self._cluster_state.nodes_urls,
                                               nodes_urls_to_add
-                                      )
+                                      ),
+                                      stable=False
                               ),
                               node_id=self._state.id)
             reply = await self._process_update_call(call)
@@ -797,11 +799,11 @@ class Node:
             return UpdateReply(status=UpdateStatus.REJECTED)
         elif (len(self._cluster_state.nodes_ids) == 1
               and not call.cluster_state.nodes_ids):
-            self._delete()
+            self._detach()
             return UpdateReply(status=UpdateStatus.SUCCEED)
-        next_cluster_state = TransitionalClusterState(old=self._cluster_state,
-                                                      new=call.cluster_state)
-        command = Command(action=START_CLUSTER_STATE_UPDATE_ACTION,
+        next_cluster_state = JointClusterState(old=self._cluster_state,
+                                               new=call.cluster_state)
+        command = Command(action=SEPARATE_CLUSTERS_ACTION,
                           parameters=next_cluster_state.as_json())
         append_record(self._state,
                       Record(cluster_id=self._cluster_state.id,
@@ -869,7 +871,7 @@ class Node:
             self._state.rejectors_nodes_ids.add(reply.node_id)
             if self._cluster_state.new.has_majority(
                     self._state.rejectors_nodes_ids):
-                self._delete()
+                self._detach()
         elif (reply.term == self._state.term
               and reply.status is VoteStatus.SUPPORTS):
             self._state.supporters_nodes_ids.add(reply.node_id)
@@ -946,14 +948,15 @@ class Node:
             new_records = suffix[len(log) - prefix_length:]
             for record in reversed(new_records):
                 command = record.command
-                if command.action == START_CLUSTER_STATE_UPDATE_ACTION:
-                    cluster_state = TransitionalClusterState.from_json(
+                if command.action == SEPARATE_CLUSTERS_ACTION:
+                    cluster_state = JointClusterState.from_json(
                             **command.parameters)
                     self._update_cluster_state(cluster_state)
                     break
-                elif command.action == END_CLUSTER_STATE_UPDATE_ACTION:
-                    cluster_state = StableClusterState.from_json(
-                            **command.parameters)
+                elif command.action == STABILIZE_CLUSTER_ACTION:
+                    cluster_state = DisjointClusterState.from_json(
+                            **command.parameters
+                    )
                     self._update_cluster_state(cluster_state)
                     break
             append_records(self._state, new_records)
@@ -973,17 +976,18 @@ class Node:
         self._process_records(records)
         self._state.commit_length += len(records)
 
-    def _delete(self) -> None:
-        self.logger.debug(f'{self._state.id} gets deleted')
+    def _detach(self) -> None:
+        self.logger.debug(f'{self._state.id} detaches')
         self._cancel_election_timer()
         self._cancel_reelection_timer()
         self._cancel_sync_timer()
         self._state.leader_node_id = None
         self._state.role = Role.FOLLOWER
-        self._update_cluster_state(StableClusterState(
+        self._update_cluster_state(DisjointClusterState(
                 ClusterId(),
                 heartbeat=self._cluster_state.heartbeat,
                 nodes_urls={self._state.id: self.url},
+                stable=False
         ))
 
     def _election_timer_callback(self, future: asyncio.Future) -> None:
@@ -1000,14 +1004,6 @@ class Node:
             self._start_election_timer()
         else:
             raise exception
-
-    def _end_cluster_state_update(self, parameters: Dict[str, Any]) -> None:
-        self.logger.debug(f'{self._state.id} ends cluster state update')
-        assert isinstance(self._cluster_state, StableClusterState)
-        assert (self._cluster_state
-                == StableClusterState.from_json(**parameters))
-        if self._state.id not in self._cluster_state.nodes_ids:
-            self._delete()
 
     def _follow(self, leader_node_id: NodeId) -> None:
         self.logger.info(f'{self._state.id} follows {leader_node_id} '
@@ -1050,22 +1046,13 @@ class Node:
         self._cancel_sync_timer()
         self._start_sync_timer()
 
-    def _solo(self) -> None:
-        self.logger.debug(f'{self._state.id} solos')
-        self._update_cluster_state(StableClusterState(
-                generate_cluster_id(),
-                heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._state.id: self.url},
-        ))
-        self._lead()
-
-    def _start_cluster_state_update(self, parameters: Dict[str, Any]) -> None:
-        self.logger.debug(f'{self._state.id} starts cluster state update')
-        assert isinstance(self._cluster_state, TransitionalClusterState)
+    def _separate_clusters(self, parameters: Dict[str, Any]) -> None:
+        self.logger.debug(f'{self._state.id} separates clusters')
+        assert isinstance(self._cluster_state, JointClusterState)
         if self._state.role is Role.LEADER:
-            cluster_state = TransitionalClusterState.from_json(**parameters)
+            cluster_state = JointClusterState.from_json(**parameters)
             assert cluster_state == self._cluster_state
-            command = Command(action=END_CLUSTER_STATE_UPDATE_ACTION,
+            command = Command(action=STABILIZE_CLUSTER_ACTION,
                               parameters=cluster_state.new.as_json())
             append_record(self._state,
                           Record(cluster_id=self._cluster_state.id,
@@ -1073,6 +1060,26 @@ class Node:
                                  term=self._state.term))
             self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
+
+    def _solo(self) -> None:
+        self.logger.debug(f'{self._state.id} solos')
+        self._update_cluster_state(DisjointClusterState(
+                generate_cluster_id(),
+                heartbeat=self._cluster_state.heartbeat,
+                nodes_urls={self._state.id: self.url},
+                stable=True
+        ))
+        self._lead()
+
+    def _stabilize_cluster(self, parameters: Dict[str, Any]) -> None:
+        self.logger.debug(f'{self._state.id} stabilizes cluster')
+        assert isinstance(self._cluster_state, DisjointClusterState)
+        assert (self._cluster_state
+                == DisjointClusterState.from_json(**parameters))
+        if self._state.id not in self._cluster_state.nodes_ids:
+            self._detach()
+        else:
+            self._cluster_state = self._cluster_state.stabilize()
 
     def _start_election_timer(self) -> None:
         self._election_duration = self._to_new_duration()
@@ -1107,7 +1114,7 @@ class Node:
                         state_to_nodes_ids_that_accepted_more_records(state))):
             self._commit([state.log[state.commit_length]])
 
-    def _update_cluster_state(self, cluster_state: AnyClusterState) -> None:
+    def _update_cluster_state(self, cluster_state: ClusterState) -> None:
         self._cluster_state = cluster_state
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)

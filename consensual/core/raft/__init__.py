@@ -1,6 +1,6 @@
 from .cluster_id import ClusterId
-from .cluster_state import (StableClusterState,
-                            TransitionalClusterState)
+from .cluster_state import (DisjointClusterState,
+                            JointClusterState)
 from .command import Command
 from .hints import (NodeId,
                     Processor,
