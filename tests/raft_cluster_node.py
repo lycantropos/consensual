@@ -183,22 +183,46 @@ class RaftClusterNode:
         return response
 
 
+class FilterRecordsWithGreaterLevel:
+    def __init__(self, max_level: int) -> None:
+        self.max_level = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno < self.max_level
+
+
 def to_logger(name: str,
               *,
               version: int = 1) -> logging.Logger:
     console_formatter = {'format': '[%(levelname)-8s %(name)s] %(msg)s'}
     formatters = {'console': console_formatter}
-    console_handler_config = {'class': 'logging.StreamHandler',
-                              'level': logging.DEBUG,
-                              'formatter': 'console',
-                              'stream': sys.stdout}
-    handlers = {'console': console_handler_config}
+    stderr_handler_config = {
+        'class': 'logging.StreamHandler',
+        'level': logging.WARNING,
+        'formatter': 'console',
+        'stream': sys.stderr,
+    }
+    stdout_handler_config = {
+        'class': 'logging.StreamHandler',
+        'level': logging.DEBUG,
+        'formatter': 'console',
+        'stream': sys.stdout,
+        'filters': ['stdout']
+    }
+    handlers = {'stdout': stdout_handler_config,
+                'stderr': stderr_handler_config}
     loggers = {name: {'level': logging.DEBUG,
-                      'handlers': ('console',)}}
+                      'handlers': ('stderr', 'stdout')}}
     config = {'formatters': formatters,
               'handlers': handlers,
               'loggers': loggers,
-              'version': version}
+              'version': version,
+              'filters': {
+                  'stdout': {
+                      '()': FilterRecordsWithGreaterLevel,
+                      'max_level': logging.WARNING,
+                  }
+              }}
     logging.config.dictConfig(config)
     return logging.getLogger(name)
 
