@@ -588,13 +588,15 @@ class Node:
             self.logger.debug(f'{self._state.id} gets removed')
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
             del rest_nodes_urls[self._state.id]
-        call = UpdateCall(cluster_state=DisjointClusterState(
-                                  generate_cluster_id(),
-                                  heartbeat=self._cluster_state.heartbeat,
-                                  nodes_urls=rest_nodes_urls,
-                                  stable=False
-                          ),
-                          node_id=self._state.id)
+        call = UpdateCall(
+                cluster_state=DisjointClusterState(
+                        generate_cluster_id(),
+                        heartbeat=self._cluster_state.heartbeat,
+                        nodes_urls=rest_nodes_urls,
+                        stable=False
+                ),
+                node_id=self._state.id
+        )
         reply = await self._process_update_call(call)
         result = {'error': update_status_to_error_message(reply.status)}
         return web.json_response(result)
@@ -641,16 +643,18 @@ class Node:
             self.logger.debug('{id} initializes adding of {nodes_ids}'
                               .format(id=self._state.id,
                                       nodes_ids=', '.join(nodes_urls_to_add)))
-            call = UpdateCall(cluster_state=DisjointClusterState(
-                                      generate_cluster_id(),
-                                      heartbeat=self._cluster_state.heartbeat,
-                                      nodes_urls=unite_mappings(
-                                              self._cluster_state.nodes_urls,
-                                              nodes_urls_to_add
-                                      ),
-                                      stable=False
-                              ),
-                              node_id=self._state.id)
+            call = UpdateCall(
+                    cluster_state=DisjointClusterState(
+                            generate_cluster_id(),
+                            heartbeat=self._cluster_state.heartbeat,
+                            nodes_urls=unite_mappings(
+                                    self._cluster_state.nodes_urls,
+                                    nodes_urls_to_add
+                            ),
+                            stable=False
+                    ),
+                    node_id=self._state.id
+            )
             reply = await self._process_update_call(call)
             result = {'error': update_status_to_error_message(reply.status)}
             return web.json_response(result)
