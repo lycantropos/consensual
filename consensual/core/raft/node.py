@@ -331,27 +331,21 @@ class UpdateReply:
 
 
 class VoteCall:
-    __slots__ = '_cluster_id', '_log_length', '_log_term', '_node_id', '_term'
+    __slots__ = '_log_length', '_log_term', '_node_id', '_term'
 
     def __new__(cls,
                 *,
-                cluster_id: ClusterId,
                 log_length: int,
                 log_term: Term,
                 node_id: NodeId,
                 term: Term) -> 'VoteCall':
         self = super().__new__(cls)
-        (
-            self._cluster_id, self._log_length, self._log_term, self._node_id,
-            self._term
-        ) = cluster_id, log_length, log_term, node_id, term
+        self._log_length, self._log_term, self._node_id, self._term = (
+            log_length, log_term, node_id, term
+        )
         return self
 
     __repr__ = generate_repr(__new__)
-
-    @property
-    def cluster_id(self) -> ClusterId:
-        return self._cluster_id
 
     @property
     def log_length(self) -> int:
@@ -384,8 +378,7 @@ class VoteCall:
                    term=term)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'cluster_id': self.cluster_id.as_json(),
-                'log_length': self.log_length,
+        return {'log_length': self.log_length,
                 'log_term': self.log_term,
                 'node_id': self.node_id,
                 'term': self.term}
@@ -698,8 +691,7 @@ class Node:
             return SyncReply.from_json(**raw_reply)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
-        call = VoteCall(cluster_id=self._cluster_state.id,
-                        node_id=self._state.id,
+        call = VoteCall(node_id=self._state.id,
                         term=self._state.term,
                         log_length=len(self._state.log),
                         log_term=self._state.log_term)
@@ -847,14 +839,7 @@ class Node:
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self._state.id} processes {call}')
-        if not self._cluster_state.id.agrees_with(call.cluster_id):
-            self.logger.debug(f'{self._state.id} skips voting '
-                              f'for {call.node_id} '
-                              f'because it has conflicting cluster id')
-            return VoteReply(node_id=self._state.id,
-                             status=VoteStatus.CONFLICTS,
-                             term=self._state.term)
-        elif call.node_id not in self._cluster_state.nodes_ids:
+        if call.node_id not in self._cluster_state.nodes_ids:
             self.logger.debug(f'{self._state.id} skips voting '
                               f'for {call.node_id} '
                               f'because it is not in cluster state')
