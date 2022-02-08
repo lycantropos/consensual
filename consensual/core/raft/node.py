@@ -287,11 +287,9 @@ class UpdateCall:
     @classmethod
     def from_json(cls,
                   *,
-                  cluster_id: RawClusterId,
                   cluster_state: Dict[str, Any],
                   node_id: NodeId) -> 'UpdateCall':
-        return cls(cluster_id=ClusterId.from_json(cluster_id),
-                   cluster_state=DisjointClusterState.from_json(
+        return cls(cluster_state=DisjointClusterState.from_json(
                            **cluster_state),
                    node_id=node_id)
 
