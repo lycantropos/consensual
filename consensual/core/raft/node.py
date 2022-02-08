@@ -650,7 +650,7 @@ class Node:
             return web.json_response(result)
         else:
             self._solo()
-            return web.HTTPOk()
+            return web.json_response({'error': None})
 
     async def _handle_record(self, request: web.Request) -> web.Response:
         parameters = await request.json()
