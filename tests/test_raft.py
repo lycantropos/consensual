@@ -61,7 +61,7 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def leader_completeness(self) -> None:
-        assert all(implication(new_state.role is Role.LEADER,
+        assert all(implication(node.new_node_state.role is Role.LEADER,
                                all(map(eq,
                                        node.new_node_state.log[
                                        :node.old_node_state.commit_length
