@@ -853,10 +853,10 @@ class Node:
         elif (self._state.leader_node_id is not None
               and (self._to_time() - self._last_heartbeat_time
                    < self._cluster_state.heartbeat)):
-            self.logger.debug(
-                    f'{self._state.id} skips voting for {call.node_id} '
-                    f'because leader {self._state.leader_node_id} '
-                    f'can be alive')
+            self.logger.debug(f'{self._state.id} ignores voting '
+                              f'initiated by {call.node_id} '
+                              f'because leader {self._state.leader_node_id} '
+                              f'can be available')
             return VoteReply(node_id=self._state.id,
                              status=VoteStatus.IGNORES,
                              term=self._state.term)
