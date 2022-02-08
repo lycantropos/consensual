@@ -366,13 +366,11 @@ class VoteCall:
     @classmethod
     def from_json(cls,
                   *,
-                  cluster_id: RawClusterId,
                   log_length: int,
                   log_term: Term,
                   node_id: NodeId,
                   term: Term) -> 'VoteCall':
-        return cls(cluster_id=ClusterId.from_json(cluster_id),
-                   log_length=log_length,
+        return cls(log_length=log_length,
                    log_term=log_term,
                    node_id=node_id,
                    term=term)
