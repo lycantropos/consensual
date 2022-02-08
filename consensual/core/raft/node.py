@@ -72,11 +72,11 @@ class CallPath(enum.IntEnum):
 
 
 class LogCall:
-    __slots__ = '_command',
+    __slots__ = '_command', '_node_id'
 
-    def __new__(cls, command: Command) -> 'LogCall':
+    def __new__(cls, *, command: Command, node_id: NodeId) -> 'LogCall':
         self = super().__new__(cls)
-        self._command = command
+        self._command, self._node_id = command, node_id
         return self
 
     __repr__ = generate_repr(__new__)
@@ -85,32 +85,50 @@ class LogCall:
     def command(self) -> Command:
         return self._command
 
+    @property
+    def node_id(self) -> NodeId:
+        return self._node_id
+
     @classmethod
-    def from_json(cls, command: Dict[str, Any]) -> 'LogCall':
-        return cls(Command(**command))
+    def from_json(cls,
+                  *,
+                  command: Dict[str, Any],
+                  node_id: NodeId) -> 'LogCall':
+        return cls(command=Command.from_json(**command),
+                   node_id=node_id)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'command': self.command.as_json()}
+        return {'command': self.command.as_json(),
+                'node_id': self.node_id}
+
+
+class LogStatus(enum.IntEnum):
+    REJECTED = enum.auto()
+    SUCCEED = enum.auto()
+    UNAVAILABLE = enum.auto()
+    UNGOVERNABLE = enum.auto()
 
 
 class LogReply:
-    __slots__ = '_error',
+    __slots__ = '_status',
 
-    def __new__(cls, error: Optional[str]) -> 'LogReply':
+    def __new__(cls, status: LogStatus) -> 'LogReply':
         self = super().__new__(cls)
-        self._error = error
+        self._status = status
         return self
 
     __repr__ = generate_repr(__new__)
 
     @property
-    def error(self) -> Optional[str]:
-        return self._error
+    def status(self) -> LogStatus:
+        return self._status
 
-    from_json = classmethod(__new__)
+    @classmethod
+    def from_json(cls, status: int) -> 'LogReply':
+        return cls(LogStatus(status))
 
     def as_json(self) -> Dict[str, Any]:
-        return {'error': self.error}
+        return {'status': int(self.status)}
 
 
 class SyncCall:
@@ -290,8 +308,8 @@ class UpdateCall:
                   cluster_state: Dict[str, Any],
                   node_id: NodeId) -> 'UpdateCall':
         return cls(cluster_state=DisjointClusterState.from_json(
-                           **cluster_state),
-                   node_id=node_id)
+                **cluster_state),
+                node_id=node_id)
 
     def as_json(self) -> Dict[str, Any]:
         return {'cluster_state': self.cluster_state.as_json(),
@@ -660,10 +678,12 @@ class Node:
 
     async def _handle_record(self, request: web.Request) -> web.Response:
         parameters = await request.json()
-        reply = await self._process_log_call(
-                LogCall(Command(action=request.path,
-                                parameters=parameters)))
-        return web.json_response(reply.as_json())
+        call = LogCall(command=Command(action=request.path,
+                                       parameters=parameters),
+                       node_id=self._state.id)
+        reply = await self._process_log_call(call)
+        result = {'error': log_status_to_error_message(reply.status)}
+        return web.json_response(result)
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
         prefix_length = self._state.sent_lengths[node_id]
@@ -707,17 +727,8 @@ class Node:
     async def _process_log_call(self, call: LogCall) -> LogReply:
         self.logger.debug(f'{self._state.id} processes {call}')
         if self._state.leader_node_id is None:
-            return LogReply(error=f'{self._state.id} has no leader')
-        elif self._state.role is Role.LEADER:
-            append_record(self._state,
-                          Record(cluster_id=self._cluster_state.id,
-                                 command=call.command,
-                                 term=self._state.term))
-            await self._sync_followers_once()
-            assert self._state.accepted_lengths[self._state.id] == len(
-                    self._state.log)
-            return LogReply(error=None)
-        else:
+            return LogReply(status=LogStatus.UNGOVERNABLE)
+        elif self._state.role is not Role.LEADER:
             assert self._state.role is Role.FOLLOWER
             try:
                 raw_reply = await asyncio.wait_for(
@@ -725,10 +736,21 @@ class Node:
                                         CallPath.LOG, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
-            except (asyncio.TimeoutError, ClientError, OSError) as exception:
-                return LogReply(error=format_exception(exception))
+            except (asyncio.TimeoutError, ClientError, OSError):
+                return LogReply(status=LogStatus.UNAVAILABLE)
             else:
                 return LogReply.from_json(**raw_reply)
+        elif call.node_id not in self._cluster_state.nodes_ids:
+            return LogReply(status=LogStatus.REJECTED)
+        else:
+            append_record(self._state,
+                          Record(cluster_id=self._cluster_state.id,
+                                 command=call.command,
+                                 term=self._state.term))
+            await self._sync_followers_once()
+            assert self._state.accepted_lengths[self._state.id] == len(
+                    self._state.log)
+            return LogReply(status=LogStatus.SUCCEED)
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._state.id} processes {call}')
@@ -1157,13 +1179,25 @@ def node_url_to_id(url: URL) -> NodeId:
     return f'{host_to_ip_address(url.host)}:{url.port}'
 
 
-def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:
-    if status is UpdateStatus.UNGOVERNABLE:
+def log_status_to_error_message(status: LogStatus) -> Optional[str]:
+    if status is LogStatus.REJECTED:
+        return 'node does not belong to cluster'
+    elif status is LogStatus.UNAVAILABLE:
+        return 'leader is unavailable'
+    elif status is LogStatus.UNGOVERNABLE:
         return 'node has no leader'
-    elif status is UpdateStatus.REJECTED:
+    else:
+        assert status is LogStatus.SUCCEED, f'unknown status: {status!r}'
+        return None
+
+
+def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:
+    if status is UpdateStatus.REJECTED:
         return 'node does not belong to cluster'
     elif status is UpdateStatus.UNAVAILABLE:
         return 'leader is unavailable'
+    if status is UpdateStatus.UNGOVERNABLE:
+        return 'node has no leader'
     elif status is UpdateStatus.UNSTABLE:
         return 'cluster is in unstable mode'
     else:
