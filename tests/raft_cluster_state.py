@@ -2,6 +2,7 @@ from typing import List
 
 from reprit.base import generate_repr
 
+from consensual.core.raft.cluster_id import RawClusterId
 from consensual.raft import (ClusterId,
                              NodeId)
 
@@ -22,3 +23,15 @@ class RaftClusterState:
     @property
     def id(self) -> ClusterId:
         return self._id
+
+    @classmethod
+    def from_json(cls,
+                  id_: RawClusterId,
+                  *,
+                  heartbeat: float,
+                  nodes_ids: List[NodeId],
+                  stable: bool) -> 'RaftClusterState':
+        return cls(ClusterId.from_json(id_),
+                   heartbeat=heartbeat,
+                   nodes_ids=nodes_ids,
+                   stable=stable)

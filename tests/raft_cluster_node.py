@@ -114,35 +114,13 @@ class RaftClusterNode:
         response = self._get('/cluster')
         response.raise_for_status()
         raw_state = response.json()
-        raw_id, heartbeat, nodes_ids, stable = (
-            raw_state['id'], raw_state['heartbeat'], raw_state['nodes_ids'],
-            raw_state['stable'],
-        )
-        return RaftClusterState(ClusterId.from_json(raw_id),
-                                heartbeat=heartbeat,
-                                nodes_ids=nodes_ids,
-                                stable=stable)
+        return RaftClusterState.from_json(raw_state.pop('id'), **raw_state)
 
     def load_node_state(self) -> RaftNodeState:
         response = self._get('/node')
         response.raise_for_status()
         raw_state = response.json()
-        (
-            commit_length, id_, leader_node_id, raw_log, raw_node_role,
-            supported_node_id, term,
-        ) = (
-            raw_state['commit_length'], raw_state['id'],
-            raw_state['leader_node_id'], raw_state['log'], raw_state['role'],
-            raw_state['supported_node_id'], raw_state['term'],
-        )
-        log = [Record.from_json(**raw_record) for raw_record in raw_log]
-        return RaftNodeState(id_,
-                             commit_length=commit_length,
-                             leader_node_id=leader_node_id,
-                             log=log,
-                             role=Role(raw_node_role),
-                             supported_node_id=supported_node_id,
-                             term=term)
+        return RaftNodeState.from_json(raw_state.pop('id'), **raw_state)
 
     def restart(self) -> None:
         assert self._process is None
@@ -237,6 +215,8 @@ def _run_node(url: URL,
                          heartbeat=heartbeat,
                          logger=to_logger(url.authority),
                          processors=processors)
+    node._app.router.add_get('/cluster', to_get_cluster_handler(node))
+    node._app.router.add_get('/node', to_get_node_handler(node))
     node._app.middlewares.append(to_latency_simulator(
             max_delay=heartbeat / (2 * MAX_RUNNING_NODES_COUNT),
             random_seed=random_seed))
@@ -268,3 +248,32 @@ def to_latency_simulator(*,
         return result
 
     return middleware
+
+
+def to_get_cluster_handler(node: Node) -> Handler:
+    async def handler(request: web.Request) -> web.Response:
+        result_data = {'id': node._cluster_state.id.as_json(),
+                       'heartbeat': node._cluster_state.heartbeat,
+                       'nodes_ids': list(node._cluster_state.nodes_ids),
+                       'stable': node._cluster_state.stable}
+        return web.json_response(result_data)
+
+    return handler
+
+
+def to_get_node_handler(node: Node) -> Handler:
+    async def handler(request: web.Request) -> web.Response:
+        result_data = {
+            'id': node._state.id,
+            'commit_length': node._state.commit_length,
+            'leader_node_id': node._state.leader_node_id,
+            'log': [record.as_json() for record in node._state.log],
+            'role': node._state.role,
+            'supported_node_id': node._state.supported_node_id,
+            'supporters_nodes_ids': list(node._state.supporters_nodes_ids),
+            'term': node._state.term,
+        }
+        return web.json_response(result_data)
+
+    return handler
+
