@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+import json
 import logging.config
 import multiprocessing.synchronize
 import sys
@@ -13,17 +14,15 @@ from typing import (Any,
                     Sequence)
 
 import requests
-from aiohttp import web
+from aiohttp import (hdrs,
+                     web)
 from reprit.base import generate_repr
 from requests import (Response,
                       Session)
 from yarl import URL
 
-from consensual.raft import (ClusterId,
-                             Node,
-                             Processor,
-                             Record,
-                             Role)
+from consensual.raft import (Node,
+                             Processor)
 from .raft_cluster_state import RaftClusterState
 from .raft_node_state import RaftNodeState
 from .utils import MAX_RUNNING_NODES_COUNT
@@ -47,6 +46,10 @@ class RaftClusterNode:
                 args=(self.url, self.processors, self.heartbeat,
                       self.random_seed, self._event))
         self._session = Session()
+        self._old_cluster_state: Optional[RaftClusterState] = None
+        self._old_node_state: Optional[RaftNodeState] = None
+        self._new_cluster_state: Optional[RaftClusterState] = None
+        self._new_node_state: Optional[RaftNodeState] = None
 
     __repr__ = generate_repr(__init__)
 
@@ -80,6 +83,7 @@ class RaftClusterNode:
             break
         else:
             raise RuntimeError(f'all ports from {ports} are occupied')
+        self.update_states()
         return self
 
     def __eq__(self, other: 'RaftClusterNode') -> bool:
@@ -90,37 +94,55 @@ class RaftClusterNode:
     def __hash__(self) -> int:
         return hash(self.url)
 
+    @property
+    def old_cluster_state(self) -> RaftClusterState:
+        return self._old_cluster_state
+
+    @property
+    def old_node_state(self) -> RaftNodeState:
+        return self._old_node_state
+
+    @property
+    def new_cluster_state(self) -> RaftClusterState:
+        return self._new_cluster_state
+
+    @property
+    def new_node_state(self) -> RaftNodeState:
+        return self._new_node_state
+
     def add(self, *nodes: 'RaftClusterNode') -> Optional[str]:
         response = requests.post(self._url_string,
                                  json=[str(node.url) for node in nodes])
         response.raise_for_status()
-        return response.json()['error']
+        response_data = response.json()
+        self._update_states(response_data['states'])
+        return response_data['result']['error']
 
     def initialize(self) -> None:
-        assert requests.post(self._url_string).ok
+        response = requests.post(self._url_string)
+        response.raise_for_status()
+        response_data = response.json()
+        self._update_states(response_data['states'])
+        return response_data['result']['error']
 
     def log(self, path: str, parameters: Any) -> None:
         response = requests.post(str(self.url.with_path(path)),
                                  json=parameters)
         response.raise_for_status()
-        return response.json()['error']
+        response_data = response.json()
+        self._update_states(response_data['states'])
+        return response_data['result']['error']
 
     def delete(self) -> Optional[str]:
         response = requests.delete(self._url_string)
         response.raise_for_status()
-        return response.json()['error']
+        response_data = response.json()
+        self._update_states(response_data['states'])
+        return response_data['result']['error']
 
     def load_cluster_state(self) -> RaftClusterState:
-        response = self._get('/cluster')
-        response.raise_for_status()
-        raw_state = response.json()
-        return RaftClusterState.from_json(raw_state.pop('id'), **raw_state)
-
-    def load_node_state(self) -> RaftNodeState:
-        response = self._get('/node')
-        response.raise_for_status()
-        raw_state = response.json()
-        return RaftNodeState.from_json(raw_state.pop('id'), **raw_state)
+        result = self._update_cluster_state()
+        return result
 
     def restart(self) -> None:
         assert self._process is None
@@ -132,6 +154,7 @@ class RaftClusterNode:
         self._process.start()
         self._event.wait()
         del self._event
+        self.update_states()
 
     def stop(self) -> None:
         self._session.close()
@@ -144,7 +167,32 @@ class RaftClusterNode:
         else:
             self._process.kill()
             time.sleep(5)
+        self._new_cluster_state = self._old_cluster_state = None
+        self._new_node_state = self._old_node_state = None
         self._process = None
+
+    def update_states(self) -> None:
+        response = self._get('/states')
+        response.raise_for_status()
+        raw_states = response.json()
+        raw_cluster_state = raw_states['cluster']
+        cluster_state = RaftClusterState.from_json(raw_cluster_state.pop('id'),
+                                                   **raw_cluster_state)
+        raw_node_state = raw_states['node']
+        node_state = RaftNodeState.from_json(raw_node_state.pop('id'),
+                                             **raw_node_state)
+        self._new_cluster_state, self._old_cluster_state = (
+            cluster_state,
+            cluster_state
+            if self._new_cluster_state is None
+            else self._new_cluster_state
+        )
+        self._new_node_state, self._old_node_state = (
+            node_state,
+            node_state
+            if self._new_node_state is None
+            else self._new_node_state
+        )
 
     def _get(self, path: str) -> Response:
         last_error = None
@@ -159,6 +207,17 @@ class RaftClusterNode:
         else:
             raise last_error
         return response
+
+    def _update_states(self, raw: Dict[str, Any]) -> None:
+        raw_after, raw_before = raw['after'], raw['before']
+        self._old_cluster_state = RaftClusterState.from_json(
+                **raw_before['cluster']
+        )
+        self._new_cluster_state = RaftClusterState.from_json(
+                **raw_after['cluster']
+        )
+        self._old_node_state = RaftNodeState.from_json(**raw_before['node'])
+        self._new_node_state = RaftNodeState.from_json(**raw_after['node'])
 
 
 class FilterRecordsWithGreaterLevel:
@@ -215,11 +274,11 @@ def _run_node(url: URL,
                          heartbeat=heartbeat,
                          logger=to_logger(url.authority),
                          processors=processors)
-    node._app.router.add_get('/cluster', to_get_cluster_handler(node))
-    node._app.router.add_get('/node', to_get_node_handler(node))
+    node._app.router.add_get('/states', to_states_handler(node))
     node._app.middlewares.append(to_latency_simulator(
             max_delay=heartbeat / (2 * MAX_RUNNING_NODES_COUNT),
             random_seed=random_seed))
+    node._app.middlewares.append(to_states_appender(node))
     url = node.url
     web.run_app(node._app,
                 host=url.host,
@@ -250,20 +309,13 @@ def to_latency_simulator(*,
     return middleware
 
 
-def to_get_cluster_handler(node: Node) -> Handler:
+def to_states_handler(node: Node) -> Handler:
     async def handler(request: web.Request) -> web.Response:
-        result_data = {'id': node._cluster_state.id.as_json(),
-                       'heartbeat': node._cluster_state.heartbeat,
-                       'nodes_ids': list(node._cluster_state.nodes_ids),
-                       'stable': node._cluster_state.stable}
-        return web.json_response(result_data)
-
-    return handler
-
-
-def to_get_node_handler(node: Node) -> Handler:
-    async def handler(request: web.Request) -> web.Response:
-        result_data = {
+        cluster_data = {'id': node._cluster_state.id.as_json(),
+                        'heartbeat': node._cluster_state.heartbeat,
+                        'nodes_ids': list(node._cluster_state.nodes_ids),
+                        'stable': node._cluster_state.stable}
+        node_data = {
             'id': node._state.id,
             'commit_length': node._state.commit_length,
             'leader_node_id': node._state.leader_node_id,
@@ -273,7 +325,49 @@ def to_get_node_handler(node: Node) -> Handler:
             'supporters_nodes_ids': list(node._state.supporters_nodes_ids),
             'term': node._state.term,
         }
-        return web.json_response(result_data)
+        return web.json_response({'cluster': cluster_data,
+                                  'node': node_data})
 
     return handler
 
+
+def to_states_appender(node: Node) -> Middleware:
+    @web.middleware
+    async def middleware(request: web.Request,
+                         handler: Handler) -> web.StreamResponse:
+        if request.method not in (hdrs.METH_POST,
+                                  hdrs.METH_DELETE):
+            return await handler(request)
+        states_before = to_raw_states(node)
+        result: web.Response = await handler(request)
+        return (web.json_response({'states': {'after': to_raw_states(node),
+                                              'before': states_before},
+                                   'result': json.loads(result.text)})
+                if result.content_type == 'application/json'
+                else result)
+
+    return middleware
+
+
+def to_raw_cluster_state(node: Node) -> Dict[str, Any]:
+    return {'id_': node._cluster_state.id.as_json(),
+            'heartbeat': node._cluster_state.heartbeat,
+            'nodes_ids': list(node._cluster_state.nodes_ids),
+            'stable': node._cluster_state.stable}
+
+
+def to_raw_node_state(node: Node) -> Dict[str, Any]:
+    return {'id_': node._state.id,
+            'commit_length': node._state.commit_length,
+            'leader_node_id': node._state.leader_node_id,
+            'log': [record.as_json() for record in node._state.log],
+            'role': node._state.role,
+            'supported_node_id': node._state.supported_node_id,
+            'supporters_nodes_ids':
+                list(node._state.supporters_nodes_ids),
+            'term': node._state.term}
+
+
+def to_raw_states(node: Node) -> Dict[str, Any]:
+    return {'cluster': to_raw_cluster_state(node),
+            'node': to_raw_node_state(node)}
