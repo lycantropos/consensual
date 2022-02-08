@@ -114,14 +114,16 @@ class LogReply:
 
 
 class SyncCall:
-    __slots__ = ('_cluster_id', '_commit_length', '_node_id', '_prefix_length',
-                 '_prefix_term', '_suffix', '_term')
+    __slots__ = ('_cluster_id', '_commit_length', '_node_id',
+                 '_prefix_cluster_id', '_prefix_length', '_prefix_term',
+                 '_suffix', '_term')
 
     def __new__(cls,
                 *,
                 cluster_id: ClusterId,
                 commit_length: int,
                 node_id: NodeId,
+                prefix_cluster_id: ClusterId,
                 prefix_length: int,
                 prefix_term: Term,
                 suffix: List[Record],
@@ -129,10 +131,11 @@ class SyncCall:
         self = super().__new__(cls)
         (
             self._cluster_id, self._commit_length, self._node_id,
-            self._prefix_length, self._prefix_term, self._suffix, self._term
+            self._prefix_cluster_id, self._prefix_length, self._prefix_term,
+            self._suffix, self._term
         ) = (
-            cluster_id, commit_length, node_id, prefix_length, prefix_term,
-            suffix, term,
+            cluster_id, commit_length, node_id, prefix_cluster_id,
+            prefix_length, prefix_term, suffix, term,
         )
         return self
 
@@ -149,6 +152,10 @@ class SyncCall:
     @property
     def node_id(self) -> NodeId:
         return self._node_id
+
+    @property
+    def prefix_cluster_id(self) -> ClusterId:
+        return self._prefix_cluster_id
 
     @property
     def prefix_length(self) -> int:
@@ -172,6 +179,7 @@ class SyncCall:
                   cluster_id: RawClusterId,
                   commit_length: int,
                   node_id: NodeId,
+                  prefix_cluster_id: RawClusterId,
                   prefix_length: int,
                   prefix_term: Term,
                   suffix: List[Dict[str, Any]],
@@ -179,6 +187,7 @@ class SyncCall:
         return cls(cluster_id=ClusterId.from_json(cluster_id),
                    commit_length=commit_length,
                    node_id=node_id,
+                   prefix_cluster_id=ClusterId.from_json(prefix_cluster_id),
                    prefix_length=prefix_length,
                    prefix_term=prefix_term,
                    suffix=[Record.from_json(**record) for record in suffix],
@@ -188,6 +197,7 @@ class SyncCall:
         return {'cluster_id': self.cluster_id.as_json(),
                 'commit_length': self.commit_length,
                 'node_id': self.node_id,
+                'prefix_cluster_id': self.prefix_cluster_id.as_json(),
                 'prefix_length': self.prefix_length,
                 'prefix_term': self.prefix_term,
                 'suffix': [record.as_json() for record in self.suffix],
@@ -678,6 +688,10 @@ class Node:
         call = SyncCall(cluster_id=self._cluster_state.id,
                         commit_length=self._state.commit_length,
                         node_id=self._state.id,
+                        prefix_cluster_id
+                        =(self._state.log[prefix_length - 1].cluster_id
+                          if prefix_length
+                          else ClusterId()),
                         prefix_length=prefix_length,
                         prefix_term=(self._state.log[prefix_length - 1].term
                                      if prefix_length
@@ -737,10 +751,15 @@ class Node:
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._state.id} processes {call}')
-        states_agree = (self._cluster_state.id.agrees_with(call.cluster_id)
-                        if self._cluster_state.id
-                        else not self._state.log)
-        if not states_agree:
+        clusters_agree = (
+                len(self._state.log) >= call.prefix_length
+                and ((not self._cluster_state.id
+                      or self._cluster_state.id.agrees_with(call.cluster_id))
+                     if call.prefix_length == 0
+                     else (self._state.log[call.prefix_length - 1].cluster_id
+                           == call.prefix_cluster_id))
+        )
+        if not clusters_agree:
             return SyncReply(accepted_length=0,
                              node_id=self._state.id,
                              status=SyncStatus.CONFLICT,
@@ -753,11 +772,14 @@ class Node:
         elif (call.term == self._state.term
               and self._state.leader_node_id is None):
             self._follow(call.node_id)
-        if (call.term == self._state.term
+        states_agree = (
+                call.term == self._state.term
                 and (len(self._state.log) >= call.prefix_length
                      and (call.prefix_length == 0
                           or (self._state.log[call.prefix_length - 1].term
-                              == call.prefix_term)))):
+                              == call.prefix_term)))
+        )
+        if states_agree:
             self._append_records(call.prefix_length, call.suffix)
             if call.commit_length > self._state.commit_length:
                 self._commit(self._state.log[self._state.commit_length
@@ -965,7 +987,9 @@ class Node:
         log = self._state.log
         if suffix and len(log) > prefix_length:
             index = min(len(log), prefix_length + len(suffix)) - 1
-            if log[index].term != suffix[index - prefix_length].term:
+            if (log[index].term != suffix[index - prefix_length].term
+                    or (log[index].cluster_id
+                        != suffix[index - prefix_length].cluster_id)):
                 del log[prefix_length:]
         if prefix_length + len(suffix) > len(log):
             new_records = suffix[len(log) - prefix_length:]
