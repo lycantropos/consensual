@@ -43,7 +43,7 @@ class RaftNetwork(RuleBasedStateMachine):
         }
         new_commit_lengths = {
             node.new_node_state.id: node.new_node_state.commit_length
-            for node in nodes
+            for node in self._nodes
         }
         assert all(
                 old_commit_lengths.get(node_id, 0) <= new_commit_length
