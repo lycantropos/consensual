@@ -264,24 +264,17 @@ class SyncReply:
 
 
 class UpdateCall:
-    __slots__ = '_cluster_id', '_cluster_state', '_node_id'
+    __slots__ = '_cluster_state', '_node_id'
 
     def __new__(cls,
                 *,
-                cluster_id: ClusterId,
                 cluster_state: DisjointClusterState,
                 node_id: NodeId) -> 'UpdateCall':
         self = super().__new__(cls)
-        self._cluster_id, self._cluster_state, self._node_id = (
-            cluster_id, cluster_state, node_id
-        )
+        self._cluster_state, self._node_id = cluster_state, node_id
         return self
 
     __repr__ = generate_repr(__new__)
-
-    @property
-    def cluster_id(self) -> ClusterId:
-        return self._cluster_id
 
     @property
     def cluster_state(self) -> DisjointClusterState:
@@ -303,13 +296,11 @@ class UpdateCall:
                    node_id=node_id)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'cluster_id': self.cluster_id.as_json(),
-                'cluster_state': self.cluster_state.as_json(),
+        return {'cluster_state': self.cluster_state.as_json(),
                 'node_id': self.node_id}
 
 
 class UpdateStatus(enum.IntEnum):
-    CONFLICTS = enum.auto()
     REJECTED = enum.auto()
     SUCCEED = enum.auto()
     UNAVAILABLE = enum.auto()
@@ -604,8 +595,7 @@ class Node:
             self.logger.debug(f'{self._state.id} gets removed')
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
             del rest_nodes_urls[self._state.id]
-        call = UpdateCall(cluster_id=self._cluster_state.id,
-                          cluster_state=DisjointClusterState(
+        call = UpdateCall(cluster_state=DisjointClusterState(
                                   generate_cluster_id(),
                                   heartbeat=self._cluster_state.heartbeat,
                                   nodes_urls=rest_nodes_urls,
@@ -658,8 +648,7 @@ class Node:
             self.logger.debug('{id} initializes adding of {nodes_ids}'
                               .format(id=self._state.id,
                                       nodes_ids=', '.join(nodes_urls_to_add)))
-            call = UpdateCall(cluster_id=self._cluster_state.id,
-                              cluster_state=DisjointClusterState(
+            call = UpdateCall(cluster_state=DisjointClusterState(
                                       generate_cluster_id(),
                                       heartbeat=self._cluster_state.heartbeat,
                                       nodes_urls=unite_mappings(
@@ -836,12 +825,10 @@ class Node:
                 return UpdateReply(status=UpdateStatus.UNAVAILABLE)
             else:
                 return UpdateReply.from_json(**raw_reply)
-        elif not self._cluster_state.id.agrees_with(call.cluster_id):
-            return UpdateReply(status=UpdateStatus.CONFLICTS)
-        elif not self._cluster_state.stable:
-            return UpdateReply(status=UpdateStatus.UNSTABLE)
         elif call.node_id not in self._cluster_state.nodes_ids:
             return UpdateReply(status=UpdateStatus.REJECTED)
+        elif not self._cluster_state.stable:
+            return UpdateReply(status=UpdateStatus.UNSTABLE)
         elif (len(self._cluster_state.nodes_ids) == 1
               and not call.cluster_state.nodes_ids):
             self._detach()
@@ -1186,9 +1173,7 @@ def node_url_to_id(url: URL) -> NodeId:
 
 
 def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:
-    if status is UpdateStatus.CONFLICTS:
-        return 'node does not belong to cluster'
-    elif status is UpdateStatus.UNGOVERNABLE:
+    if status is UpdateStatus.UNGOVERNABLE:
         return 'node has no leader'
     elif status is UpdateStatus.REJECTED:
         return 'node does not belong to cluster'
