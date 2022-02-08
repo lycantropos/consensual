@@ -160,9 +160,13 @@ class RaftNetwork(RuleBasedStateMachine):
         nodes_states_before = self.load_nodes_states(nodes)
         errors = list(self._executor.map(RaftClusterNode.delete, nodes))
         self.update_states()
-        assert all(equivalence(error is None,
-                               cluster_state.stable
-                               and node_state.leader_node_id is not None)
+        assert all(implication(error is None,
+                               node_state.leader_node_id is not None
+                               and implication(node_state.role is Role.LEADER,
+                                               cluster_state.stable))
+                   and implication(node_state.role is Role.LEADER
+                                   and cluster_state.stable,
+                                   error is None)
                    for cluster_state, node_state, error
                    in zip(clusters_states_before, nodes_states_before, errors))
 
