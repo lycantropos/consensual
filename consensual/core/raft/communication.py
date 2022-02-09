@@ -34,17 +34,21 @@ class Communication(Generic[_Receiver, _Path]):
                  registry: Mapping[_Receiver, URL]) -> None:
         self._heartbeat, self._paths, self.registry = (heartbeat, paths,
                                                        registry)
-        self._latencies: Dict[URL, deque] = {
+        self._latencies: Dict[_Receiver, deque] = {
             receiver: deque([0],
                             maxlen=10)
             for receiver in self.registry.keys()
         }
         self._loop = asyncio.get_event_loop()
-        self._messages = {receiver: asyncio.Queue()
-                          for receiver in self.registry.keys()}
-        self._results = {receiver: {path: asyncio.Queue()
-                                    for path in self.paths}
-                         for receiver in self.registry.keys()}
+        self._messages: Dict[_Receiver, asyncio.Queue] = {
+            receiver: asyncio.Queue(loop=self._loop)
+            for receiver in self.registry.keys()
+        }
+        self._results: Dict[_Receiver, Dict[_Path, asyncio.Queue]] = {
+            receiver: {path: asyncio.Queue(loop=self._loop)
+                       for path in self.paths}
+            for receiver in self.registry.keys()
+        }
         self._session = ClientSession(loop=self._loop)
         self._channels = {
             receiver: self._loop.create_task(self._channel(receiver))
@@ -73,18 +77,18 @@ class Communication(Generic[_Receiver, _Path]):
     def connect(self, receiver: _Receiver) -> None:
         self._latencies[receiver] = deque([0],
                                           maxlen=10)
-        self._messages[receiver] = asyncio.Queue()
-        self._results[receiver] = {path: asyncio.Queue()
+        self._messages[receiver] = asyncio.Queue(loop=self._loop)
+        self._results[receiver] = {path: asyncio.Queue(loop=self._loop)
                                    for path in self.paths}
         self._channels[receiver] = self._loop.create_task(
                 self._channel(receiver)
         )
 
-    def disconnect(self, url: URL) -> None:
-        self._channels.pop(url).cancel()
-        del (self._messages[url],
-             self._latencies[url],
-             self._results[url])
+    def disconnect(self, receiver: _Receiver) -> None:
+        self._channels.pop(receiver).cancel()
+        del (self._messages[receiver],
+             self._latencies[receiver],
+             self._results[receiver])
 
     def to_expected_broadcast_time(self) -> float:
         return sum(max(latencies) for latencies in self._latencies.values())
