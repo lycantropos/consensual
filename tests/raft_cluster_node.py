@@ -72,15 +72,8 @@ class RaftClusterNode:
                             port=candidate)
             self = cls(index, url, processors, random_seed,
                        heartbeat=heartbeat)
-            process = self._process
-            process.start()
-            self._event.wait()
-            del self._event
-            time.sleep(1)
-            if not process.is_alive():
-                del candidates[candidate_index]
-                continue
-            break
+            if self.start():
+                break
         else:
             raise RuntimeError(f'all ports from {ports} are occupied')
         self.update_states()
@@ -147,8 +140,11 @@ class RaftClusterNode:
         result = self._update_cluster_state()
         return result
 
-    def restart(self) -> None:
+    def restart(self) -> bool:
         assert self._process is None
+        return self.start()
+
+    def start(self) -> bool:
         self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
                 target=_run_node,
@@ -157,7 +153,11 @@ class RaftClusterNode:
         self._process.start()
         self._event.wait()
         del self._event
+        time.sleep(1)
+        if not self._process.is_alive():
+            return False
         self.update_states()
+        return True
 
     def stop(self) -> None:
         self._session.close()

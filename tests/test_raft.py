@@ -237,7 +237,8 @@ class RaftNetwork(RuleBasedStateMachine):
           nodes=consumes(shutdown_nodes))
     def restart_nodes(self, nodes: List[RaftClusterNode]
                       ) -> List[RaftClusterNode]:
-        _exhaust(self._executor.map(RaftClusterNode.restart, nodes))
+        succeeded = list(self._executor.map(RaftClusterNode.restart, nodes))
+        nodes = [node for node, success in zip(nodes, succeeded) if success]
         self._nodes += nodes
         return nodes
 
