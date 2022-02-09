@@ -725,8 +725,6 @@ class Node:
                                  command=call.command,
                                  term=self._state.term))
             await self._sync_followers_once()
-            assert self._state.accepted_lengths[self._state.id] == len(
-                    self._state.log)
             return LogReply(status=LogStatus.SUCCEED)
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
