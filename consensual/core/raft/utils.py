@@ -1,13 +1,6 @@
-import traceback
 from socket import gethostbyname as host_to_ip_address
 from typing import (Mapping,
                     TypeVar)
-
-
-def format_exception(value: Exception) -> str:
-    return ''.join(traceback.format_exception(type(value), value,
-                                              value.__traceback__))
-
 
 host_to_ip_address = host_to_ip_address
 
