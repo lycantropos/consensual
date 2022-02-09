@@ -133,8 +133,11 @@ class RaftClusterNode:
         self._update_states(response_data['states'])
         return response_data['result']['error']
 
-    def delete(self) -> Optional[str]:
-        response = requests.delete(self._url_string)
+    def delete(self, *nodes: 'RaftClusterNode') -> Optional[str]:
+        response = requests.delete(self._url_string,
+                                   json=([str(node.url) for node in nodes]
+                                         if nodes
+                                         else None))
         response.raise_for_status()
         response_data = response.json()
         self._update_states(response_data['states'])

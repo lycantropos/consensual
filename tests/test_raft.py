@@ -25,6 +25,7 @@ from consensual.raft import (Processor,
 from . import strategies
 from .raft_cluster_node import RaftClusterNode
 from .utils import (MAX_RUNNING_NODES_COUNT,
+                    equivalence,
                     implication,
                     transpose)
 
@@ -170,6 +171,34 @@ class RaftNetwork(RuleBasedStateMachine):
                                 and node.old_cluster_state.stable,
                                 error is None)
                 for node, error in zip(nodes, errors)
+        )
+
+    @rule(source_nodes=running_nodes,
+          target_nodes=running_nodes)
+    def delete_many_nodes(self,
+                          source_nodes: List[RaftClusterNode],
+                          target_nodes: List[RaftClusterNode]) -> None:
+        errors = list(self._executor.map(RaftClusterNode.delete, target_nodes,
+                                         source_nodes))
+        assert all(
+                implication(
+                        error is None,
+                        target_node.old_node_state.leader_node_id is not None
+                        and implication(
+                                target_node.old_node_state.role is Role.LEADER,
+                                target_node.old_cluster_state.stable
+                        )
+                        and (source_node.new_node_state.id
+                             in target_node.old_cluster_state.nodes_ids))
+                and implication(
+                        target_node.old_node_state.role is Role.LEADER
+                        and target_node.old_cluster_state.stable
+                        and (source_node.new_node_state.id
+                             in target_node.old_cluster_state.nodes_ids),
+                        error is None
+                )
+                for source_node, target_node, error
+                in zip(source_nodes, target_nodes, errors)
         )
 
     @rule(nodes=running_nodes)
