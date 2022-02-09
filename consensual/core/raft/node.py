@@ -506,14 +506,16 @@ class Node:
         @web.middleware
         async def error_middleware(
                 request: web.Request,
-                handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+                handler: Callable[[web.Request],
+                                  Awaitable[web.StreamResponse]],
+                log: Callable[[str], None] = self.logger.exception
         ) -> web.StreamResponse:
             try:
                 result = await handler(request)
             except web.HTTPException:
                 raise
             except Exception:
-                logger.exception('Something unexpected happened:')
+                log('Something unexpected happened:')
                 raise
             else:
                 return result
