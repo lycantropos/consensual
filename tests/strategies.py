@@ -57,7 +57,7 @@ base_paths = (plain_base_paths
                                                        to_longer_base_paths),
                                   plain_base_paths))
 paths = base_paths.map('/{}'.format)
-processors_parameters = {waiting_processor: strategies.floats(-10, 10)}
+processors_parameters = {waiting_processor: strategies.floats(0, 10)}
 processors = strategies.sampled_from(list(processors_parameters))
 processors_dicts = strategies.dictionaries(keys=paths,
                                            values=processors)
