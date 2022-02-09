@@ -1065,10 +1065,10 @@ class Node:
 
     def _separate_clusters(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._state.id} separates clusters')
-        assert isinstance(self._cluster_state, JointClusterState)
         if self._state.role is Role.LEADER:
             cluster_state = JointClusterState.from_json(**parameters)
-            assert cluster_state == self._cluster_state
+            if cluster_state != self._cluster_state:
+                return
             command = Command(action=STABILIZE_CLUSTER_ACTION,
                               parameters=cluster_state.new.as_json())
             append_record(self._state,
@@ -1090,13 +1090,12 @@ class Node:
 
     def _stabilize_cluster(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._state.id} stabilizes cluster')
-        assert isinstance(self._cluster_state, DisjointClusterState)
-        assert (self._cluster_state
-                == DisjointClusterState.from_json(**parameters))
-        if self._state.id not in self._cluster_state.nodes_ids:
+        if self._cluster_state != DisjointClusterState.from_json(**parameters):
+            pass
+        elif self._state.id not in self._cluster_state.nodes_ids:
             self._detach()
         else:
-            self._cluster_state = self._cluster_state.stabilize()
+            self._update_cluster_state(self._cluster_state.stabilize())
 
     def _start_election_timer(self) -> None:
         self._election_duration = self._to_new_duration()
