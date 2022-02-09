@@ -46,8 +46,7 @@ from .node_state import (NodeState,
                          update_state_nodes_ids,
                          update_state_term)
 from .record import Record
-from .utils import (format_exception,
-                    host_to_ip_address,
+from .utils import (host_to_ip_address,
                     subtract_mapping,
                     unite_mappings)
 
