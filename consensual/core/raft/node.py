@@ -1,13 +1,17 @@
-import asyncio
 import enum
 import json
 import logging.config
 import random
 import uuid
 from asyncio import (AbstractEventLoop,
+                     Future,
+                     TimeoutError,
+                     gather,
                      get_event_loop,
                      new_event_loop,
-                     set_event_loop)
+                     set_event_loop,
+                     sleep,
+                     wait_for)
 from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from typing import (Any,
@@ -485,7 +489,11 @@ class Node:
         self._processors = {} if processors is None else processors
         self._loop = safe_get_event_loop()
         self._app = web.Application()
-        self._commands_executor = ThreadPoolExecutor(max_workers=1)
+        self._commands_executor = ThreadPoolExecutor(
+                initializer=set_event_loop,
+                initargs=(self._loop,),
+                max_workers=1
+        )
         self._communication: Communication[NodeId, CallPath] = Communication(
                 heartbeat=self._cluster_state.heartbeat,
                 paths=list(CallPath),
@@ -708,12 +716,12 @@ class Node:
         elif self._state.role is not Role.LEADER:
             assert self._state.role is Role.FOLLOWER
             try:
-                raw_reply = await asyncio.wait_for(
+                raw_reply = await wait_for(
                         self._send_call(self._state.leader_node_id,
                                         CallPath.LOG, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
-            except (asyncio.TimeoutError, ClientError, OSError):
+            except (TimeoutError, ClientError, OSError):
                 return LogReply(status=LogStatus.UNAVAILABLE)
             else:
                 return LogReply.from_json(**raw_reply)
@@ -805,12 +813,12 @@ class Node:
             return UpdateReply(status=UpdateStatus.UNGOVERNABLE)
         elif self._state.role is not Role.LEADER:
             try:
-                raw_reply = await asyncio.wait_for(
+                raw_reply = await wait_for(
                         self._send_call(self._state.leader_node_id,
                                         CallPath.UPDATE, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
-            except (asyncio.TimeoutError, ClientError, OSError):
+            except (TimeoutError, ClientError, OSError):
                 return UpdateReply(status=UpdateStatus.UNAVAILABLE)
             else:
                 return UpdateReply.from_json(**raw_reply)
@@ -907,10 +915,10 @@ class Node:
         self._state.supporters_nodes_ids.clear()
         start = self._to_time()
         try:
-            await asyncio.wait_for(
-                    asyncio.gather(*[self._agitate_voter(node_id)
-                                     for node_id
-                                     in self._cluster_state.nodes_ids]),
+            await wait_for(
+                    gather(*[self._agitate_voter(node_id)
+                             for node_id
+                             in self._cluster_state.nodes_ids]),
                     self._election_duration)
         finally:
             duration = self._to_time() - start
@@ -921,7 +929,7 @@ class Node:
                     f'role: {self._state.role.name}, '
                     f'supporters count: '
                     f'{len(self._state.supporters_nodes_ids)}')
-            await asyncio.sleep(self._election_duration - duration)
+            await sleep(self._election_duration - duration)
 
     async def _send_call(self,
                          to: NodeId,
@@ -942,13 +950,13 @@ class Node:
             duration = self._to_time() - start
             self.logger.debug(
                     f'{self._state.id} followers\' sync took {duration}s')
-            await asyncio.sleep(
+            await sleep(
                     self._cluster_state.heartbeat - duration
                     - self._communication.to_expected_broadcast_time())
 
     async def _sync_followers_once(self) -> None:
-        await asyncio.gather(*[self._sync_follower(node_id)
-                               for node_id in self._cluster_state.nodes_ids])
+        await gather(*[self._sync_follower(node_id)
+                       for node_id in self._cluster_state.nodes_ids])
 
     def _append_records(self,
                         prefix_length: int,
@@ -1006,7 +1014,7 @@ class Node:
                 stable=False
         ))
 
-    def _election_timer_callback(self, future: asyncio.Future) -> None:
+    def _election_timer_callback(self, future: Future) -> None:
         if future.cancelled():
             self.logger.debug(f'{self._state.id} has election been cancelled')
             return
@@ -1014,7 +1022,7 @@ class Node:
         if exception is None:
             assert future.result() is None
             self._start_election_timer()
-        elif isinstance(exception, asyncio.TimeoutError):
+        elif isinstance(exception, TimeoutError):
             future.cancel()
             self.logger.debug(f'{self._state.id} has election been timed out')
             self._start_election_timer()
@@ -1047,7 +1055,8 @@ class Node:
     def _process_commands(self, commands: List[Command]) -> None:
         for command in commands:
             try:
-                self._commands_processors[command.action](self, command.parameters)
+                self._commands_processors[command.action](self,
+                                                          command.parameters)
             except Exception:
                 self.logger.exception(f'Failed processing {command.action} '
                                       f'with parameters {command.parameters}:')
