@@ -1048,7 +1048,11 @@ class Node:
 
     def _process_commands(self, commands: List[Command]) -> None:
         for command in commands:
-            self._commands_processors[command.action](self, command.parameters)
+            try:
+                self._commands_processors[command.action](self, command.parameters)
+            except Exception:
+                self.logger.exception(f'Failed processing {command.action} '
+                                      f'with parameters {command.parameters}:')
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self._state.id} restarts election timer '
