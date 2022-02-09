@@ -41,11 +41,11 @@ class Communication(Generic[_Receiver, _Path]):
         }
         self._loop = asyncio.get_event_loop()
         self._messages: Dict[_Receiver, asyncio.Queue] = {
-            receiver: asyncio.Queue(loop=self._loop)
+            receiver: asyncio.Queue()
             for receiver in self.registry.keys()
         }
         self._results: Dict[_Receiver, Dict[_Path, asyncio.Queue]] = {
-            receiver: {path: asyncio.Queue(loop=self._loop)
+            receiver: {path: asyncio.Queue()
                        for path in self.paths}
             for receiver in self.registry.keys()
         }
@@ -77,8 +77,8 @@ class Communication(Generic[_Receiver, _Path]):
     def connect(self, receiver: _Receiver) -> None:
         self._latencies[receiver] = deque([0],
                                           maxlen=10)
-        self._messages[receiver] = asyncio.Queue(loop=self._loop)
-        self._results[receiver] = {path: asyncio.Queue(loop=self._loop)
+        self._messages[receiver] = asyncio.Queue()
+        self._results[receiver] = {path: asyncio.Queue()
                                    for path in self.paths}
         self._channels[receiver] = self._loop.create_task(
                 self._channel(receiver)
