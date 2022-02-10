@@ -24,7 +24,6 @@ from consensual.raft import (Processor,
 from . import strategies
 from .raft_cluster_node import RaftClusterNode
 from .utils import (MAX_RUNNING_NODES_COUNT,
-                    equivalence,
                     implication,
                     transpose)
 
