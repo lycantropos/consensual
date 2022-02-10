@@ -314,6 +314,24 @@ def to_latency_simulator(*,
     return middleware
 
 
+def to_states_appender(node: Node) -> Middleware:
+    @web.middleware
+    async def middleware(request: web.Request,
+                         handler: Handler) -> web.StreamResponse:
+        if request.method not in (hdrs.METH_POST,
+                                  hdrs.METH_DELETE):
+            return await handler(request)
+        states_before = to_raw_states(node)
+        result: web.Response = await handler(request)
+        return (web.json_response({'states': {'after': to_raw_states(node),
+                                              'before': states_before},
+                                   'result': json.loads(result.text)})
+                if result.content_type == 'application/json'
+                else result)
+
+    return middleware
+
+
 def to_states_handler(node: Node) -> Handler:
     async def handler(request: web.Request) -> web.Response:
         cluster_data = {'id': node._cluster_state.id.as_json(),
@@ -334,24 +352,6 @@ def to_states_handler(node: Node) -> Handler:
                                   'node': node_data})
 
     return handler
-
-
-def to_states_appender(node: Node) -> Middleware:
-    @web.middleware
-    async def middleware(request: web.Request,
-                         handler: Handler) -> web.StreamResponse:
-        if request.method not in (hdrs.METH_POST,
-                                  hdrs.METH_DELETE):
-            return await handler(request)
-        states_before = to_raw_states(node)
-        result: web.Response = await handler(request)
-        return (web.json_response({'states': {'after': to_raw_states(node),
-                                              'before': states_before},
-                                   'result': json.loads(result.text)})
-                if result.content_type == 'application/json'
-                else result)
-
-    return middleware
 
 
 def to_raw_cluster_state(node: Node) -> Dict[str, Any]:
