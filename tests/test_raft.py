@@ -15,7 +15,6 @@ from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
                                  consumes,
                                  invariant,
-                                 multiple,
                                  precondition,
                                  rule)
 from hypothesis.strategies import DataObject
@@ -110,8 +109,8 @@ class RaftNetwork(RuleBasedStateMachine):
     shutdown_nodes = Bundle('shutdown_nodes')
 
     @rule(target=running_nodes,
-          source_nodes=consumes(running_nodes),
-          target_nodes=consumes(running_nodes))
+          source_nodes=running_nodes,
+          target_nodes=running_nodes)
     def add_nodes(self,
                   target_nodes: List[RaftClusterNode],
                   source_nodes: List[RaftClusterNode]
@@ -133,7 +132,6 @@ class RaftNetwork(RuleBasedStateMachine):
                 for (target_node, source_node, error)
                 in zip(target_nodes, source_nodes, errors)
         )
-        return multiple(source_nodes, target_nodes)
 
     def is_not_full(self) -> bool:
         return len(self._nodes) < MAX_RUNNING_NODES_COUNT
