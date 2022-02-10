@@ -103,9 +103,11 @@ class RaftClusterNode:
     def new_node_state(self) -> RaftNodeState:
         return self._new_node_state
 
-    def add(self, *nodes: 'RaftClusterNode') -> Optional[str]:
+    def add(self, node: 'RaftClusterNode', *rest: 'RaftClusterNode'
+            ) -> Optional[str]:
         response = requests.post(self._url_string,
-                                 json=[str(node.url) for node in nodes])
+                                 json=[str(node.url)
+                                       for node in [node, *rest]])
         response.raise_for_status()
         response_data = response.json()
         self._update_states(response_data['states'])
