@@ -54,12 +54,12 @@ from .utils import (host_to_ip_address,
                     subtract_mapping,
                     unite_mappings)
 
-SEPARATE_CLUSTERS_ACTION = '0'
-STABILIZE_CLUSTER_ACTION = '1'
-assert (SEPARATE_CLUSTERS_ACTION
-        and not SEPARATE_CLUSTERS_ACTION.startswith('/'))
-assert (STABILIZE_CLUSTER_ACTION
-        and not STABILIZE_CLUSTER_ACTION.startswith('/'))
+
+class InternalAction:
+    SEPARATE_CLUSTERS = '0'
+    STABILIZE_CLUSTER = '1'
+    assert SEPARATE_CLUSTERS and not SEPARATE_CLUSTERS.startswith('/')
+    assert STABILIZE_CLUSTER and not STABILIZE_CLUSTER.startswith('/')
 
 
 class Call(Protocol):
@@ -453,12 +453,12 @@ class VoteReply:
 
 
 class Node:
-    __slots__ = ('_app', '_cluster_state', '_commands_executor',
-                 '_commands_processors', '_communication',
+    __slots__ = ('_app', '_cluster_state', '_external_commands_executor',
+                 '_internal_processors', '_communication',
                  '_election_duration', '_election_task',
                  '_last_heartbeat_time', '_logger', '_loop', '_patch_routes',
-                 '_processors', '_reelection_lag', '_reelection_task',
-                 '_state', '_sync_task', '_url')
+                 '_external_processors', '_reelection_lag', '_reelection_task',
+                 '_state', '_sync_task', '_internal_commands_executor', '_url')
 
     @classmethod
     def from_url(cls,
@@ -486,14 +486,26 @@ class Node:
         self._cluster_state, self._state = _cluster_state, _state
         self._url = self._cluster_state.nodes_urls[self._state.id]
         self._logger = logging.getLogger() if logger is None else logger
-        self._processors = {} if processors is None else processors
         self._loop = safe_get_event_loop()
         self._app = web.Application()
-        self._commands_executor = ThreadPoolExecutor(
+        self._external_processors = MappingProxyType({}
+                                                     if processors is None
+                                                     else processors)
+        self._external_commands_executor = ThreadPoolExecutor(
+                initializer=set_event_loop_if_none,
+                max_workers=1,
+                thread_name_prefix='external'
+        )
+        self._internal_commands_executor = ThreadPoolExecutor(
                 initializer=set_event_loop,
                 initargs=(self._loop,),
-                max_workers=1
+                max_workers=1,
+                thread_name_prefix='internal'
         )
+        self._internal_processors = MappingProxyType({
+            InternalAction.SEPARATE_CLUSTERS: Node._separate_clusters,
+            InternalAction.STABILIZE_CLUSTER: Node._stabilize_cluster
+        })
         self._communication: Communication[NodeId, CallPath] = Communication(
                 heartbeat=self._cluster_state.heartbeat,
                 paths=list(CallPath),
@@ -535,11 +547,6 @@ class Node:
                                    self._handle_communication)
         for path in self.processors.keys():
             self._app.router.add_post(path, self._handle_record)
-        self._commands_processors: Mapping[str, Processor] = MappingProxyType({
-            **self.processors,
-            SEPARATE_CLUSTERS_ACTION: Node._separate_clusters,
-            STABILIZE_CLUSTER_ACTION: Node._stabilize_cluster
-        })
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
@@ -550,7 +557,7 @@ class Node:
 
     @property
     def processors(self) -> Mapping[str, Processor]:
-        return MappingProxyType(self._processors)
+        return self._external_processors
 
     @property
     def url(self) -> URL:
@@ -664,7 +671,8 @@ class Node:
     async def _handle_record(self, request: web.Request) -> web.Response:
         parameters = await request.json()
         call = LogCall(command=Command(action=request.path,
-                                       parameters=parameters),
+                                       parameters=parameters,
+                                       internal=False),
                        node_id=self._state.id)
         reply = await self._process_log_call(call)
         result = {'error': log_status_to_error_message(reply.status)}
@@ -832,8 +840,9 @@ class Node:
             return UpdateReply(status=UpdateStatus.SUCCEED)
         next_cluster_state = JointClusterState(old=self._cluster_state,
                                                new=call.cluster_state)
-        command = Command(action=SEPARATE_CLUSTERS_ACTION,
-                          parameters=next_cluster_state.as_json())
+        command = Command(action=InternalAction.SEPARATE_CLUSTERS,
+                          parameters=next_cluster_state.as_json(),
+                          internal=True)
         append_record(self._state,
                       Record(cluster_id=self._cluster_state.id,
                              command=command,
@@ -972,12 +981,15 @@ class Node:
             new_records = suffix[len(log) - prefix_length:]
             for record in reversed(new_records):
                 command = record.command
-                if command.action == SEPARATE_CLUSTERS_ACTION:
+                if command.external:
+                    continue
+                elif command.action == InternalAction.SEPARATE_CLUSTERS:
                     cluster_state = JointClusterState.from_json(
                             **command.parameters)
                     self._update_cluster_state(cluster_state)
                     break
-                elif command.action == STABILIZE_CLUSTER_ACTION:
+                else:
+                    assert command.action == InternalAction.STABILIZE_CLUSTER
                     cluster_state = DisjointClusterState.from_json(
                             **command.parameters
                     )
@@ -997,7 +1009,8 @@ class Node:
 
     def _commit(self, records: List[Record]) -> None:
         assert records
-        self._process_records(records)
+        self._trigger_commands_processing([record.command
+                                           for record in records])
         self._state.commit_length += len(records)
 
     def _detach(self) -> None:
@@ -1047,16 +1060,30 @@ class Node:
         self._cancel_election_timer()
         self._start_sync_timer()
 
-    def _process_records(self, records: List[Record]) -> None:
-        self._loop.run_in_executor(self._commands_executor,
-                                   self._process_commands,
-                                   [record.command for record in records])
+    def _trigger_commands_processing(self, commands: List[Command]) -> None:
+        external_commands = [command
+                             for command in commands
+                             if command.external]
+        internal_commands = [command
+                             for command in commands
+                             if command.internal]
+        if external_commands:
+            self._loop.run_in_executor(self._external_commands_executor,
+                                       self._process_commands,
+                                       external_commands,
+                                       self._external_processors)
+        if internal_commands:
+            self._loop.run_in_executor(self._internal_commands_executor,
+                                       self._process_commands,
+                                       internal_commands,
+                                       self._internal_processors)
 
-    def _process_commands(self, commands: List[Command]) -> None:
+    def _process_commands(self,
+                          commands: List[Command],
+                          processors: Mapping[str, Processor]) -> None:
         for command in commands:
             try:
-                self._commands_processors[command.action](self,
-                                                          command.parameters)
+                processors[command.action](self, command.parameters)
             except Exception:
                 self.logger.exception(f'Failed processing {command.action} '
                                       f'with parameters {command.parameters}:')
@@ -1081,8 +1108,9 @@ class Node:
             cluster_state = JointClusterState.from_json(**parameters)
             if cluster_state != self._cluster_state:
                 return
-            command = Command(action=STABILIZE_CLUSTER_ACTION,
-                              parameters=cluster_state.new.as_json())
+            command = Command(action=InternalAction.STABILIZE_CLUSTER,
+                              parameters=cluster_state.new.as_json(),
+                              internal=True)
             append_record(self._state,
                           Record(cluster_id=self._cluster_state.id,
                                  command=command,
@@ -1156,6 +1184,13 @@ def safe_get_event_loop() -> AbstractEventLoop:
         result = new_event_loop()
         set_event_loop(result)
     return result
+
+
+def set_event_loop_if_none() -> None:
+    try:
+        get_event_loop()
+    except RuntimeError:
+        set_event_loop(new_event_loop())
 
 
 def generate_cluster_id() -> ClusterId:
