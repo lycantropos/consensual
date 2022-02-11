@@ -546,7 +546,10 @@ class Node:
         self._app.router.add_route(self._communication.HTTP_METHOD, '/',
                                    self._handle_communication)
         for path in self.processors.keys():
-            self._app.router.add_post(path, self._handle_record)
+            route = self._app.router.add_post(path, self._handle_record)
+            resource = route.resource
+            self.logger.debug(f'{self._state.id} has registered '
+                              f'resource {resource.canonical}')
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
