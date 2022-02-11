@@ -107,13 +107,11 @@ class RaftNetwork(RuleBasedStateMachine):
     running_nodes = Bundle('running_nodes')
     shutdown_nodes = Bundle('shutdown_nodes')
 
-    @rule(target=running_nodes,
-          source_nodes=running_nodes,
+    @rule(source_nodes=running_nodes,
           target_nodes=running_nodes)
     def add_nodes(self,
                   target_nodes: List[RaftClusterNode],
-                  source_nodes: List[RaftClusterNode]
-                  ) -> List[RaftClusterNode]:
+                  source_nodes: List[RaftClusterNode]) -> None:
         source_nodes = source_nodes[:len(target_nodes)]
         errors = list(self._executor.map(RaftClusterNode.add, target_nodes,
                                          source_nodes))
