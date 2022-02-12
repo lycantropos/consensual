@@ -1086,9 +1086,15 @@ class Node:
                           processors: Mapping[str, Processor]) -> None:
         for command in commands:
             try:
-                processors[command.action](self, command.parameters)
+                processor = processors[command.action]
+            except KeyError:
+                self.logger.error(f'{self._state.id} has no processor '
+                                  f'"{command.action}"')
+                continue
+            try:
+                processor(self, command.parameters)
             except Exception:
-                self.logger.exception(f'Failed processing {command.action} '
+                self.logger.exception(f'Failed processing "{command.action}" '
                                       f'with parameters {command.parameters}:')
 
     def _restart_election_timer(self) -> None:
