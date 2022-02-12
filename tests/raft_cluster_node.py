@@ -282,7 +282,7 @@ def _run_node(url: URL,
     node._app.router.add_get('/states', to_states_handler(node))
     node._app.middlewares.append(
             to_latency_simulator(max_delay=(heartbeat
-                                            / (2 * MAX_RUNNING_NODES_COUNT)),
+                                            / (MAX_RUNNING_NODES_COUNT ** 2)),
                                  random_seed=random_seed)
     )
     node._app.middlewares.append(to_states_appender(node))
