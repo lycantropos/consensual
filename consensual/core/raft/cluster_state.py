@@ -99,13 +99,15 @@ class DisjointClusterState:
 class JointClusterState:
     __slots__ = '_id', '_new', '_old'
 
-    def __init__(self,
-                 *,
-                 old: DisjointClusterState,
-                 new: DisjointClusterState) -> None:
+    def __new__(cls,
+                *,
+                old: DisjointClusterState,
+                new: DisjointClusterState) -> 'JointClusterState':
+        self = super().__new__(cls)
         self._id, self._new, self._old = old.id.join_with(new.id), new, old
+        return self
 
-    __repr__ = generate_repr(__init__)
+    __repr__ = generate_repr(__new__)
 
     def __eq__(self, other: Any) -> Any:
         return (self.old == other.old and self.new == other.new
