@@ -9,7 +9,7 @@ from typing import (Callable,
 import click
 from yarl import URL
 
-import consensual
+import consensual.raft
 from consensual import defaults
 from consensual.raft import (Node,
                              Processor)
