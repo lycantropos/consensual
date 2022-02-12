@@ -16,17 +16,21 @@ from .hints import (NodeId,
 class DisjointClusterState:
     __slots__ = '_heartbeat', '_id', '_nodes_urls', '_stable'
 
-    def __init__(self,
-                 _id: ClusterId,
-                 *,
-                 heartbeat: Time,
-                 nodes_urls: Mapping[NodeId, URL],
-                 stable: bool) -> None:
+    def __new__(cls,
+                _id: ClusterId,
+                *,
+                heartbeat: Time,
+                nodes_urls: Mapping[NodeId, URL],
+                stable: bool) -> 'DisjointClusterState':
+        if heartbeat < 0:
+            raise ValueError('heartbeat should be non-negative')
+        self = super().__new__(cls)
         self._heartbeat, self._id, self._nodes_urls, self._stable = (
             heartbeat, _id, nodes_urls, stable
         )
+        return self
 
-    __repr__ = generate_repr(__init__)
+    __repr__ = generate_repr(__new__)
 
     def __eq__(self, other: Any) -> Any:
         return ((self.id == other.id
