@@ -156,14 +156,17 @@ class RaftNetwork(RuleBasedStateMachine):
     def delete_nodes(self, nodes: List[RaftClusterNode]) -> None:
         errors = list(self._executor.map(RaftClusterNode.delete, nodes))
         assert all(
-                implication(error is None,
-                            node.old_node_state.leader_node_id is not None
-                            and implication(
-                                    node.old_node_state.role is Role.LEADER,
-                                    node.old_cluster_state.stable
-                            ))
-                and implication(node.old_node_state.role is Role.LEADER
-                                and node.old_cluster_state.stable,
+                implication(
+                        error is None,
+                        len(node.old_cluster_state.nodes_ids) == 1
+                        or (node.old_node_state.leader_node_id is not None
+                            and implication(node.old_node_state.role
+                                            is Role.LEADER,
+                                            node.old_cluster_state.stable))
+                )
+                and implication(len(node.old_cluster_state.nodes_ids) == 1
+                                or (node.old_node_state.role is Role.LEADER
+                                    and node.old_cluster_state.stable),
                                 error is None)
                 for node, error in zip(nodes, errors)
         )
@@ -178,18 +181,26 @@ class RaftNetwork(RuleBasedStateMachine):
         assert all(
                 implication(
                         error is None,
-                        target_node.old_node_state.leader_node_id is not None
-                        and implication(
-                                target_node.old_node_state.role is Role.LEADER,
-                                target_node.old_cluster_state.stable
-                        )
-                        and (source_node.new_node_state.id
-                             in target_node.old_cluster_state.nodes_ids))
+                        (source_node.old_node_state.id
+                         == target_node.old_node_state.id)
+                        if len(target_node.old_cluster_state.nodes_ids) == 1
+                        else
+                        (target_node.old_node_state.leader_node_id is not None
+                         and implication(target_node.old_node_state.role
+                                         is Role.LEADER,
+                                         target_node.old_cluster_state.stable)
+                         and (source_node.new_node_state.id
+                              in target_node.old_cluster_state.nodes_ids))
+                )
                 and implication(
-                        target_node.old_node_state.role is Role.LEADER
-                        and target_node.old_cluster_state.stable
-                        and (source_node.new_node_state.id
-                             in target_node.old_cluster_state.nodes_ids),
+                        (source_node.old_node_state.id
+                         == target_node.old_node_state.id)
+                        if len(target_node.old_cluster_state.nodes_ids) == 1
+                        else
+                        (target_node.old_node_state.role is Role.LEADER
+                         and target_node.old_cluster_state.stable
+                         and (source_node.new_node_state.id
+                              in target_node.old_cluster_state.nodes_ids)),
                         error is None
                 )
                 for source_node, target_node, error
