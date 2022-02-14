@@ -929,8 +929,7 @@ class Node:
         try:
             await wait_for(
                     gather(*[self._agitate_voter(node_id)
-                             for node_id
-                             in self._cluster_state.nodes_ids]),
+                             for node_id in self._cluster_state.nodes_ids]),
                     self._election_duration)
         finally:
             duration = self._to_time() - start
