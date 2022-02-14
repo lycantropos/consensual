@@ -1057,24 +1057,6 @@ class Node:
         self._cancel_election_timer()
         self._start_sync_timer()
 
-    def _trigger_commands_processing(self, commands: List[Command]) -> None:
-        external_commands = [command
-                             for command in commands
-                             if command.external]
-        internal_commands = [command
-                             for command in commands
-                             if command.internal]
-        if external_commands:
-            self._loop.run_in_executor(self._external_commands_executor,
-                                       self._process_commands,
-                                       external_commands,
-                                       self._external_processors)
-        if internal_commands:
-            self._loop.run_in_executor(self._internal_commands_executor,
-                                       self._process_commands,
-                                       internal_commands,
-                                       self._internal_processors)
-
     def _process_commands(self,
                           commands: List[Command],
                           processors: Mapping[str, Processor]) -> None:
@@ -1165,6 +1147,24 @@ class Node:
 
     def _to_time(self) -> Time:
         return self._loop.time()
+
+    def _trigger_commands_processing(self, commands: List[Command]) -> None:
+        external_commands = [command
+                             for command in commands
+                             if command.external]
+        internal_commands = [command
+                             for command in commands
+                             if command.internal]
+        if external_commands:
+            self._loop.run_in_executor(self._external_commands_executor,
+                                       self._process_commands,
+                                       external_commands,
+                                       self._external_processors)
+        if internal_commands:
+            self._loop.run_in_executor(self._internal_commands_executor,
+                                       self._process_commands,
+                                       internal_commands,
+                                       self._internal_processors)
 
     def _try_commit(self) -> None:
         state = self._state
