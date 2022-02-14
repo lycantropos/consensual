@@ -315,9 +315,10 @@ class UpdateCall:
                   *,
                   cluster_state: Dict[str, Any],
                   node_id: NodeId) -> 'UpdateCall':
-        return cls(cluster_state=DisjointClusterState.from_json(
-                **cluster_state),
-                node_id=node_id)
+        return cls(
+                cluster_state=DisjointClusterState.from_json(**cluster_state),
+                node_id=node_id
+        )
 
     def as_json(self) -> Dict[str, Any]:
         return {'cluster_state': self.cluster_state.as_json(),
