@@ -2,6 +2,7 @@ import enum
 import json
 import logging.config
 import random
+import sys
 import uuid
 from asyncio import (AbstractEventLoop,
                      Future,
@@ -48,6 +49,7 @@ from .node_state import (NodeState,
                          append_records,
                          follow,
                          lead,
+                         reset,
                          start_election,
                          state_to_nodes_ids_that_accepted_more_records,
                          update_state_nodes_ids,
@@ -455,6 +457,15 @@ class VoteReply:
                 'term': self.term}
 
 
+if sys.version_info >= (3, 9):
+    def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
+        executor.shutdown(wait=False,
+                          cancel_futures=True)
+else:
+    def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
+        executor.shutdown(wait=False)
+
+
 class Node:
     __slots__ = ('_app', '_cluster_state', '_external_commands_executor',
                  '_internal_processors', '_communication',
@@ -494,16 +505,9 @@ class Node:
         self._external_processors = MappingProxyType({}
                                                      if processors is None
                                                      else processors)
-        self._external_commands_executor = ThreadPoolExecutor(
-                initializer=set_event_loop_if_none,
-                max_workers=1,
-                thread_name_prefix='external'
-        )
-        self._internal_commands_executor = ThreadPoolExecutor(
-                initializer=set_event_loop,
-                initargs=(self._loop,),
-                max_workers=1,
-                thread_name_prefix='internal'
+        self._external_commands_executor, self._internal_commands_executor = (
+            self._to_external_commands_executor(),
+            self._to_internal_commands_executor()
         )
         self._internal_processors = MappingProxyType({
             InternalAction.SEPARATE_CLUSTERS: Node._separate_clusters,
@@ -751,14 +755,9 @@ class Node:
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._state.id} processes {call}')
-        clusters_agree = (
-                len(self._state.log) >= call.prefix_length
-                and ((not self._cluster_state.id
-                      or self._cluster_state.id.agrees_with(call.cluster_id))
-                     if call.prefix_length == 0
-                     else (self._state.log[call.prefix_length - 1].cluster_id
-                           == call.prefix_cluster_id))
-        )
+        clusters_agree = (self._cluster_state.id.agrees_with(call.cluster_id)
+                          if self._cluster_state.id
+                          else not self._state.log)
         if not clusters_agree:
             return SyncReply(accepted_length=0,
                              node_id=self._state.id,
@@ -774,10 +773,13 @@ class Node:
             self._follow(call.node_id)
         states_agree = (
                 call.term == self._state.term
-                and (len(self._state.log) >= call.prefix_length
-                     and (call.prefix_length == 0
-                          or (self._state.log[call.prefix_length - 1].term
-                              == call.prefix_term)))
+                and
+                (len(self._state.log) >= call.prefix_length
+                 and (call.prefix_length == 0
+                      or ((self._state.log[call.prefix_length - 1].cluster_id
+                           == call.prefix_cluster_id)
+                          and (self._state.log[call.prefix_length - 1].term
+                               == call.prefix_term))))
         )
         if states_agree:
             self._append_records(call.prefix_length, call.suffix)
@@ -823,7 +825,14 @@ class Node:
 
     async def _process_update_call(self, call: UpdateCall) -> UpdateReply:
         self.logger.debug(f'{self._state.id} processes {call}')
-        if self._state.leader_node_id is None:
+        if (len(self._cluster_state.nodes_ids) == 1
+                and not call.cluster_state.nodes_ids):
+            if self._cluster_state.id:
+                self._detach()
+            else:
+                self._reset()
+            return UpdateReply(status=UpdateStatus.SUCCEED)
+        elif self._state.leader_node_id is None:
             return UpdateReply(status=UpdateStatus.UNGOVERNABLE)
         elif self._state.role is not Role.LEADER:
             try:
@@ -840,10 +849,6 @@ class Node:
             return UpdateReply(status=UpdateStatus.REJECTED)
         elif not self._cluster_state.stable:
             return UpdateReply(status=UpdateStatus.UNSTABLE)
-        elif (len(self._cluster_state.nodes_ids) == 1
-              and not call.cluster_state.nodes_ids):
-            self._detach()
-            return UpdateReply(status=UpdateStatus.SUCCEED)
         next_cluster_state = JointClusterState(old=self._cluster_state,
                                                new=call.cluster_state)
         command = Command(action=InternalAction.SEPARATE_CLUSTERS,
@@ -1073,6 +1078,17 @@ class Node:
                 self.logger.exception(f'Failed processing "{command.action}" '
                                       f'with parameters {command.parameters}:')
 
+    def _reset(self) -> None:
+        self.logger.debug(f'{self._state.id} resets')
+        assert not self._cluster_state.id
+        reset(self._state)
+        force_shutdown_executor(self._external_commands_executor)
+        force_shutdown_executor(self._internal_commands_executor)
+        self._external_commands_executor, self._internal_commands_executor = (
+            self._to_external_commands_executor(),
+            self._to_internal_commands_executor()
+        )
+
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self._state.id} restarts election timer '
                           f'after {self._reelection_lag}')
@@ -1134,6 +1150,21 @@ class Node:
 
     def _start_sync_timer(self) -> None:
         self._sync_task = self._loop.create_task(self._sync_followers())
+
+    def _to_external_commands_executor(self) -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(
+                initializer=set_event_loop_if_none,
+                max_workers=1,
+                thread_name_prefix='external'
+        )
+
+    def _to_internal_commands_executor(self) -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(
+                initializer=set_event_loop,
+                initargs=(self._loop,),
+                max_workers=1,
+                thread_name_prefix='internal'
+        )
 
     def _to_new_duration(self) -> Time:
         broadcast_time = self._communication.to_expected_broadcast_time()

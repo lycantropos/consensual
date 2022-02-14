@@ -112,7 +112,7 @@ class NodeState:
 
     @term.setter
     def term(self, value: Term) -> None:
-        assert value > self.term
+        assert value == 0 or value > self.term
         self._term = value
 
 
@@ -133,6 +133,15 @@ def lead(state: NodeState) -> None:
     for node_id in state.nodes_ids:
         state.sent_lengths[node_id] = len(state.log)
         state.accepted_lengths[node_id] = 0
+
+
+def reset(state: NodeState) -> None:
+    state.log.clear()
+    follow(state)
+    state.supported_node_id = None
+    state.rejectors_nodes_ids.clear()
+    state.supporters_nodes_ids.clear()
+    state.term = 0
 
 
 def start_election(state: NodeState) -> None:
