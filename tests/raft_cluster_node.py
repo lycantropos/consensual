@@ -215,14 +215,21 @@ class RaftClusterNode:
 
     def _update_states(self, raw: Dict[str, Any]) -> None:
         raw_after, raw_before = raw['after'], raw['before']
+        raw_cluster_after, raw_cluster_before = (raw_after['cluster'],
+                                                 raw_before['cluster'])
         self._old_cluster_state = RaftClusterState.from_json(
-                **raw_before['cluster']
+                raw_cluster_before.pop('id'), **raw_cluster_before
         )
         self._new_cluster_state = RaftClusterState.from_json(
-                **raw_after['cluster']
+                raw_cluster_after.pop('id'), **raw_cluster_after
         )
-        self._old_node_state = RaftNodeState.from_json(**raw_before['node'])
-        self._new_node_state = RaftNodeState.from_json(**raw_after['node'])
+        raw_node_after, raw_node_before = raw_after['node'], raw_before['node']
+        self._old_node_state = RaftNodeState.from_json(
+                raw_node_before.pop('id'), **raw_node_before
+        )
+        self._new_node_state = RaftNodeState.from_json(
+                raw_node_after.pop('id'), **raw_node_after
+        )
 
 
 class FilterRecordsWithGreaterLevel:
@@ -342,22 +349,23 @@ def to_states_handler(node: Node) -> Handler:
 
 
 def to_raw_cluster_state(node: Node) -> Dict[str, Any]:
-    return {'id_': node._cluster_state.id.as_json(),
-            'heartbeat': node._cluster_state.heartbeat,
-            'nodes_ids': list(node._cluster_state.nodes_ids),
-            'stable': node._cluster_state.stable}
+    state = node._cluster_state
+    return {'id': state.id.as_json(),
+            'heartbeat': state.heartbeat,
+            'nodes_ids': list(state.nodes_ids),
+            'stable': state.stable}
 
 
 def to_raw_node_state(node: Node) -> Dict[str, Any]:
-    return {'id_': node._state.id,
-            'commit_length': node._state.commit_length,
-            'leader_node_id': node._state.leader_node_id,
-            'log': [record.as_json() for record in node._state.log],
-            'role': node._state.role,
-            'supported_node_id': node._state.supported_node_id,
-            'supporters_nodes_ids':
-                list(node._state.supporters_nodes_ids),
-            'term': node._state.term}
+    state = node._state
+    return {'id': state.id,
+            'commit_length': state.commit_length,
+            'leader_node_id': state.leader_node_id,
+            'log': [record.as_json() for record in state.log],
+            'role': state.role,
+            'supported_node_id': state.supported_node_id,
+            'supporters_nodes_ids': list(state.supporters_nodes_ids),
+            'term': state.term}
 
 
 def to_raw_states(node: Node) -> Dict[str, Any]:
