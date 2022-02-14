@@ -457,15 +457,6 @@ class VoteReply:
                 'term': self.term}
 
 
-if sys.version_info >= (3, 9):
-    def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
-        executor.shutdown(wait=False,
-                          cancel_futures=True)
-else:
-    def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
-        executor.shutdown(wait=False)
-
-
 class Node:
     __slots__ = ('_app', '_cluster_state', '_external_commands_executor',
                  '_internal_processors', '_communication',
@@ -1211,6 +1202,35 @@ class Node:
         update_state_nodes_ids(self._state, cluster_state.nodes_ids)
 
 
+if sys.version_info >= (3, 9):
+    def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
+        executor.shutdown(wait=False,
+                          cancel_futures=True)
+else:
+    def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
+        executor.shutdown(wait=False)
+
+
+def generate_cluster_id() -> ClusterId:
+    return ClusterId(uuid.uuid4().hex)
+
+
+def log_status_to_error_message(status: LogStatus) -> Optional[str]:
+    if status is LogStatus.REJECTED:
+        return 'node does not belong to cluster'
+    elif status is LogStatus.UNAVAILABLE:
+        return 'leader is unavailable'
+    elif status is LogStatus.UNGOVERNABLE:
+        return 'node has no leader'
+    else:
+        assert status is LogStatus.SUCCEED, f'unknown status: {status!r}'
+        return None
+
+
+def node_url_to_id(url: URL) -> NodeId:
+    return f'{host_to_ip_address(url.host)}:{url.port}'
+
+
 def safe_get_event_loop() -> AbstractEventLoop:
     try:
         result = get_event_loop()
@@ -1225,26 +1245,6 @@ def set_event_loop_if_none() -> None:
         get_event_loop()
     except RuntimeError:
         set_event_loop(new_event_loop())
-
-
-def generate_cluster_id() -> ClusterId:
-    return ClusterId(uuid.uuid4().hex)
-
-
-def node_url_to_id(url: URL) -> NodeId:
-    return f'{host_to_ip_address(url.host)}:{url.port}'
-
-
-def log_status_to_error_message(status: LogStatus) -> Optional[str]:
-    if status is LogStatus.REJECTED:
-        return 'node does not belong to cluster'
-    elif status is LogStatus.UNAVAILABLE:
-        return 'leader is unavailable'
-    elif status is LogStatus.UNGOVERNABLE:
-        return 'node has no leader'
-    else:
-        assert status is LogStatus.SUCCEED, f'unknown status: {status!r}'
-        return None
 
 
 def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:
