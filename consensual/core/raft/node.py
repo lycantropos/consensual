@@ -46,6 +46,9 @@ from .node_state import (NodeState,
                          Role,
                          append_record,
                          append_records,
+                         follow,
+                         lead,
+                         start_election,
                          state_to_nodes_ids_that_accepted_more_records,
                          update_state_nodes_ids,
                          update_state_term)
@@ -764,8 +767,8 @@ class Node:
         self._last_heartbeat_time = self._to_time()
         self._restart_reelection_timer()
         if call.term > self._state.term:
-            update_state_term(self._state, call.term)
             self._follow(call.node_id)
+            update_state_term(self._state, call.term)
         elif (call.term == self._state.term
               and self._state.leader_node_id is None):
             self._follow(call.node_id)
@@ -814,8 +817,8 @@ class Node:
                         self._state.sent_lengths[reply.node_id] - 1)
                 await self._sync_follower(reply.node_id)
         elif reply.term > self._state.term:
+            follow(self._state)
             update_state_term(self._state, reply.term)
-            self._state.role = Role.FOLLOWER
             self._cancel_election_timer()
 
     async def _process_update_call(self, call: UpdateCall) -> UpdateReply:
@@ -874,8 +877,8 @@ class Node:
                              status=VoteStatus.IGNORES,
                              term=self._state.term)
         if call.term > self._state.term:
+            follow(self._state)
             update_state_term(self._state, call.term)
-            self._state.role = Role.FOLLOWER
         if (call.term == self._state.term
                 and ((call.log_term, call.log_length)
                      >= (self._state.log_term, len(self._state.log)))
@@ -914,18 +917,15 @@ class Node:
                 self._lead()
         elif reply.term > self._state.term:
             assert reply.status is VoteStatus.OPPOSES
+            follow(self._state)
             update_state_term(self._state, reply.term)
-            self._state.role = Role.FOLLOWER
             self._cancel_election_timer()
 
     async def _run_election(self) -> None:
         self.logger.debug(f'{self._state.id} runs election '
                           f'for term {self._state.term + 1}')
-        update_state_term(self._state, self._state.term + 1)
-        self._state.role = Role.CANDIDATE
-        self._state.rejectors_nodes_ids.clear()
-        self._state.supporters_nodes_ids.clear()
         start = self._to_time()
+        start_election(self._state)
         try:
             await wait_for(
                     gather(*[self._agitate_voter(node_id)
@@ -1047,18 +1047,13 @@ class Node:
     def _follow(self, leader_node_id: NodeId) -> None:
         self.logger.info(f'{self._state.id} follows {leader_node_id} '
                          f'in term {self._state.term}')
-        self._state.leader_node_id = leader_node_id
-        self._state.role = Role.FOLLOWER
+        follow(self._state, leader_node_id)
         self._cancel_election_timer()
 
     def _lead(self) -> None:
         self.logger.info(f'{self._state.id} is leader '
                          f'of term {self._state.term}')
-        self._state.leader_node_id = self._state.id
-        self._state.role = Role.LEADER
-        for node_id in self._cluster_state.nodes_ids:
-            self._state.sent_lengths[node_id] = len(self._state.log)
-            self._state.accepted_lengths[node_id] = 0
+        lead(self._state)
         self._cancel_election_timer()
         self._start_sync_timer()
 

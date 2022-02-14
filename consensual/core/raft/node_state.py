@@ -29,12 +29,13 @@ class NodeState:
         self._id = _id
         self.nodes_ids = {self.id} if nodes_ids is None else nodes_ids
         self._accepted_lengths = {node_id: 0 for node_id in self.nodes_ids}
-        self._sent_lengths = {node_id: 0 for node_id in self.nodes_ids}
         self._commit_length = 0
         self._leader_node_id = None
         self._log = [] if log is None else log
         self._rejectors_nodes_ids = set()
         self._role = Role.FOLLOWER
+        self._sent_lengths = {node_id: len(self.log)
+                              for node_id in self.nodes_ids}
         self._supported_node_id = supported_node_id
         self._supporters_nodes_ids = set()
         self._term = term
@@ -121,6 +122,24 @@ def append_record(state: NodeState, record: Record) -> None:
 
 def append_records(state: NodeState, records: List[Record]) -> None:
     state.log.extend(records)
+
+
+def follow(state: NodeState, leader_node_id: Optional[NodeId] = None) -> None:
+    state.leader_node_id, state.role = leader_node_id, Role.FOLLOWER
+
+
+def lead(state: NodeState) -> None:
+    state.leader_node_id, state.role = state.id, Role.LEADER
+    for node_id in state.nodes_ids:
+        state.sent_lengths[node_id] = len(state.log)
+        state.accepted_lengths[node_id] = 0
+
+
+def start_election(state: NodeState) -> None:
+    update_state_term(state, state.term + 1)
+    state.role = Role.CANDIDATE
+    state.rejectors_nodes_ids.clear()
+    state.supporters_nodes_ids.clear()
 
 
 def state_to_nodes_ids_that_accepted_more_records(state: NodeState
