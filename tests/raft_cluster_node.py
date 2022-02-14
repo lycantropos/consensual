@@ -336,22 +336,7 @@ def to_states_appender(node: Node) -> Middleware:
 
 def to_states_handler(node: Node) -> Handler:
     async def handler(request: web.Request) -> web.Response:
-        cluster_data = {'id': node._cluster_state.id.as_json(),
-                        'heartbeat': node._cluster_state.heartbeat,
-                        'nodes_ids': list(node._cluster_state.nodes_ids),
-                        'stable': node._cluster_state.stable}
-        node_data = {
-            'id': node._state.id,
-            'commit_length': node._state.commit_length,
-            'leader_node_id': node._state.leader_node_id,
-            'log': [record.as_json() for record in node._state.log],
-            'role': node._state.role,
-            'supported_node_id': node._state.supported_node_id,
-            'supporters_nodes_ids': list(node._state.supporters_nodes_ids),
-            'term': node._state.term,
-        }
-        return web.json_response({'cluster': cluster_data,
-                                  'node': node_data})
+        return web.json_response(to_raw_states(node))
 
     return handler
 
