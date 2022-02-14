@@ -25,7 +25,8 @@ _Path = TypeVar('_Path')
 
 class Communication(Generic[_Receiver, _Path]):
     HTTP_METHOD = hdrs.METH_PATCH
-    assert HTTP_METHOD is not hdrs.METH_POST
+    assert (HTTP_METHOD is not hdrs.METH_POST
+            and HTTP_METHOD is not hdrs.METH_DELETE)
 
     def __init__(self,
                  *,
