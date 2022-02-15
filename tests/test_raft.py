@@ -19,8 +19,8 @@ from hypothesis.stateful import (Bundle,
                                  rule)
 from hypothesis.strategies import DataObject
 
-from consensual.raft import (Processor,
-                             Role)
+from consensual.core.raft.role import RoleKind
+from consensual.raft import Processor
 from . import strategies
 from .raft_cluster_node import RaftClusterNode
 from .utils import (MAX_RUNNING_NODES_COUNT,
@@ -51,7 +51,8 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def leader_append_only(self) -> None:
-        assert all(implication(node.new_node_state.role is Role.LEADER,
+        assert all(implication(node.new_node_state.role_kind
+                               is RoleKind.LEADER,
                                (len(node.new_node_state.log)
                                 >= len(node.old_node_state.log))
                                and all(map(eq, node.new_node_state.log,
@@ -60,7 +61,8 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def leader_completeness(self) -> None:
-        assert all(implication(node.new_node_state.role is Role.LEADER,
+        assert all(implication(node.new_node_state.role_kind
+                               is RoleKind.LEADER,
                                all(map(eq,
                                        node.new_node_state.log[
                                        :node.old_node_state.commit_length
@@ -87,7 +89,7 @@ class RaftNetwork(RuleBasedStateMachine):
             cluster_state, node_state = (node.new_cluster_state,
                                          node.new_node_state)
             clusters_leaders_counts[cluster_state.id][node_state.term] += (
-                    node_state.role is Role.LEADER
+                    node_state.role_kind is RoleKind.LEADER
             )
         assert all(
                 leaders_count <= 1
@@ -121,10 +123,9 @@ class RaftNetwork(RuleBasedStateMachine):
                         target_node.old_node_state.leader_node_id is not None
                         and (source_node.old_node_state.id
                              not in target_node.old_cluster_state.nodes_ids)
-                        and implication(
-                                target_node.old_node_state.role is Role.LEADER,
-                                target_node.old_cluster_state.stable
-                        )
+                        and implication(target_node.old_node_state.role_kind
+                                        is RoleKind.LEADER,
+                                        target_node.old_cluster_state.stable)
                 )
                 for (target_node, source_node, error)
                 in zip(target_nodes, source_nodes, errors)
@@ -160,12 +161,13 @@ class RaftNetwork(RuleBasedStateMachine):
                         error is None,
                         len(node.old_cluster_state.nodes_ids) == 1
                         or (node.old_node_state.leader_node_id is not None
-                            and implication(node.old_node_state.role
-                                            is Role.LEADER,
+                            and implication(node.old_node_state.role_kind
+                                            is RoleKind.LEADER,
                                             node.old_cluster_state.stable))
                 )
                 and implication(len(node.old_cluster_state.nodes_ids) == 1
-                                or (node.old_node_state.role is Role.LEADER
+                                or ((node.old_node_state.role_kind
+                                     is RoleKind.LEADER)
                                     and node.old_cluster_state.stable),
                                 error is None)
                 for node, error in zip(nodes, errors)
@@ -186,8 +188,8 @@ class RaftNetwork(RuleBasedStateMachine):
                         if len(target_node.old_cluster_state.nodes_ids) == 1
                         else
                         (target_node.old_node_state.leader_node_id is not None
-                         and implication(target_node.old_node_state.role
-                                         is Role.LEADER,
+                         and implication(target_node.old_node_state.role_kind
+                                         is RoleKind.LEADER,
                                          target_node.old_cluster_state.stable)
                          and (source_node.new_node_state.id
                               in target_node.old_cluster_state.nodes_ids))
@@ -197,7 +199,8 @@ class RaftNetwork(RuleBasedStateMachine):
                          == target_node.old_node_state.id)
                         if len(target_node.old_cluster_state.nodes_ids) == 1
                         else
-                        (target_node.old_node_state.role is Role.LEADER
+                        ((target_node.old_node_state.role_kind
+                          is RoleKind.LEADER)
                          and target_node.old_cluster_state.stable
                          and (source_node.new_node_state.id
                               in target_node.old_cluster_state.nodes_ids)),
@@ -215,7 +218,7 @@ class RaftNetwork(RuleBasedStateMachine):
                 node.new_cluster_state.id
                 and node.new_node_state.id in node.new_cluster_state.nodes_ids
                 and len(node.new_cluster_state.nodes_ids) == 1
-                and node.new_node_state.role is Role.LEADER
+                and node.new_node_state.role_kind is RoleKind.LEADER
                 for node in nodes
         )
 
@@ -235,7 +238,8 @@ class RaftNetwork(RuleBasedStateMachine):
                                node.old_node_state.leader_node_id is not None
                                and (node.old_node_state.id
                                     in node.old_cluster_state.nodes_ids))
-                   and implication(node.old_node_state.role is Role.LEADER,
+                   and implication(node.old_node_state.role_kind
+                                   is RoleKind.LEADER,
                                    error is None)
                    for node, error in zip(nodes, errors))
 

@@ -357,15 +357,12 @@ def to_raw_cluster_state(node: Node) -> Dict[str, Any]:
 
 
 def to_raw_node_state(node: Node) -> Dict[str, Any]:
-    state = node._state
-    return {'id': state.id,
-            'commit_length': state.commit_length,
-            'leader_node_id': state.leader_node_id,
-            'log': [record.as_json() for record in state.log],
-            'role': state.role,
-            'supported_node_id': state.supported_node_id,
-            'supporters_nodes_ids': list(state.supporters_nodes_ids),
-            'term': state.term}
+    return {'id': node._id,
+            'commit_length': node._commit_length,
+            'leader_node_id': node._role.leader_node_id,
+            'log': [record.as_json() for record in node._history.log],
+            'role_kind': node._role.kind,
+            'term': node._role.term}
 
 
 def to_raw_states(node: Node) -> Dict[str, Any]:

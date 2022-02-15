@@ -2,9 +2,9 @@ from typing import List
 
 from reprit.base import generate_repr
 
-from consensual.core.raft.cluster_id import RawClusterId
-from consensual.raft import (ClusterId,
-                             NodeId)
+from consensual.core.raft.cluster_id import (ClusterId,
+                                             RawClusterId)
+from consensual.core.raft.hints import NodeId
 
 
 class RaftClusterState:
