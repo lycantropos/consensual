@@ -720,7 +720,8 @@ class Node:
                         self._send_call(self._state.leader_node_id,
                                         CallPath.LOG, call),
                         self._reelection_lag
-                        - (self._to_time() - self._last_heartbeat_time))
+                        - (self._to_time() - self._last_heartbeat_time)
+                )
             except (ClientError, OSError, ReceiverNotFound, TimeoutError):
                 return LogReply(status=LogStatus.UNAVAILABLE)
             else:
