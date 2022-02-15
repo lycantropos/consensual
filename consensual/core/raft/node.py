@@ -22,7 +22,6 @@ from typing import (Any,
                     Dict,
                     List,
                     Mapping,
-                    MutableSequence,
                     Optional)
 
 from aiohttp import (ClientError,
