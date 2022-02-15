@@ -240,6 +240,38 @@ class FilterRecordsWithGreaterLevel:
         return record.levelno < self.max_level
 
 
+def is_resetted_node(node: RaftClusterNode) -> bool:
+    return (not node.old_cluster_state.id
+            and not node.new_cluster_state.id
+            and not node.new_node_state.log
+            and node.new_node_state.term == 0)
+
+
+def run_node(url: URL,
+             processors: Dict[str, Processor],
+             heartbeat: float,
+             random_seed: int,
+             event: multiprocessing.synchronize.Event) -> None:
+    atexit.register(event.set)
+    node = Node.from_url(url,
+                         heartbeat=heartbeat,
+                         logger=to_logger(url.authority),
+                         processors=processors)
+    node._app.router.add_get('/states', to_states_handler(node))
+    node._app.middlewares.append(
+            to_latency_simulator(max_delay=(heartbeat
+                                            / (MAX_RUNNING_NODES_COUNT ** 2)),
+                                 random_seed=random_seed)
+    )
+    node._app.middlewares.append(to_states_appender(node))
+    url = node.url
+    web.run_app(node._app,
+                host=url.host,
+                port=url.port,
+                loop=node._loop,
+                print=lambda message: event.set() or print(message))
+
+
 def to_logger(name: str,
               *,
               version: int = 1) -> logging.Logger:
@@ -276,40 +308,8 @@ def to_logger(name: str,
     return logging.getLogger(name)
 
 
-def run_node(url: URL,
-             processors: Dict[str, Processor],
-             heartbeat: float,
-             random_seed: int,
-             event: multiprocessing.synchronize.Event) -> None:
-    atexit.register(event.set)
-    node = Node.from_url(url,
-                         heartbeat=heartbeat,
-                         logger=to_logger(url.authority),
-                         processors=processors)
-    node._app.router.add_get('/states', to_states_handler(node))
-    node._app.middlewares.append(
-            to_latency_simulator(max_delay=(heartbeat
-                                            / (MAX_RUNNING_NODES_COUNT ** 2)),
-                                 random_seed=random_seed)
-    )
-    node._app.middlewares.append(to_states_appender(node))
-    url = node.url
-    web.run_app(node._app,
-                host=url.host,
-                port=url.port,
-                loop=node._loop,
-                print=lambda message: event.set() or print(message))
-
-
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 Middleware = Callable[[web.Request, Handler], Awaitable[web.StreamResponse]]
-
-
-def is_resetted_node(node: RaftClusterNode) -> bool:
-    return (not node.old_cluster_state.id
-            and not node.new_cluster_state.id
-            and not node.new_node_state.log
-            and node.new_node_state.term == 0)
 
 
 def to_latency_simulator(*,
