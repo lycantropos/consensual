@@ -9,16 +9,16 @@ _T = TypeVar('_T')
 
 
 class Command(Generic[_T]):
-    __slots__ = '_action', '_parameters', '_internal'
+    __slots__ = '_action', '_internal', '_parameters'
 
     def __new__(cls,
                 *,
                 action: str,
-                parameters: Any,
-                internal: bool) -> 'Command':
+                internal: bool,
+                parameters: Any) -> 'Command':
         self = super().__new__(cls)
-        self._action, self._parameters, self._internal = (
-            action, parameters, internal
+        self._action, self._internal, self._parameters = (
+            action, internal, parameters
         )
         return self
 
