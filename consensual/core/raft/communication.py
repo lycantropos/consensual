@@ -23,6 +23,10 @@ _Receiver = TypeVar('_Receiver')
 _Path = TypeVar('_Path')
 
 
+class ReceiverNotFound(Exception):
+    pass
+
+
 class Communication(Generic[_Receiver, _Path]):
     HTTP_METHOD = hdrs.METH_PATCH
     assert (HTTP_METHOD is not hdrs.METH_POST
@@ -71,7 +75,11 @@ class Communication(Generic[_Receiver, _Path]):
                    path: _Path,
                    message: Any) -> Any:
         assert path in self.paths
-        self._messages[receiver].put_nowait((path, message))
+        try:
+            messages = self._messages[receiver]
+        except KeyError:
+            raise ReceiverNotFound(receiver)
+        messages.put_nowait((path, message))
         result: Result = await self._results[receiver][path].get()
         return result.value
 

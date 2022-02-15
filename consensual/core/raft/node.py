@@ -37,6 +37,7 @@ from .cluster_state import (ClusterState,
                             JointClusterState)
 from .command import Command
 from .communication import (Communication,
+                            ReceiverNotFound,
                             update_communication_registry)
 from .hints import (NodeId,
                     Processor,
@@ -697,7 +698,7 @@ class Node:
                         term=self._state.term)
         try:
             raw_reply = await self._send_call(node_id, CallPath.SYNC, call)
-        except (ClientError, OSError):
+        except (ClientError, OSError, ReceiverNotFound):
             return SyncReply(accepted_length=0,
                              node_id=node_id,
                              status=SyncStatus.UNAVAILABLE,
@@ -712,7 +713,7 @@ class Node:
                         log_term=self._state.log_term)
         try:
             raw_reply = await self._send_call(node_id, CallPath.VOTE, call)
-        except (ClientError, OSError):
+        except (ClientError, OSError, ReceiverNotFound):
             return VoteReply(node_id=node_id,
                              status=VoteStatus.UNAVAILABLE,
                              term=self._state.term)
@@ -731,7 +732,7 @@ class Node:
                                         CallPath.LOG, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
-            except (TimeoutError, ClientError, OSError):
+            except (ClientError, OSError, ReceiverNotFound, TimeoutError):
                 return LogReply(status=LogStatus.UNAVAILABLE)
             else:
                 return LogReply.from_json(**raw_reply)
@@ -833,7 +834,7 @@ class Node:
                                         CallPath.UPDATE, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
-            except (TimeoutError, ClientError, OSError):
+            except (ClientError, OSError, ReceiverNotFound, TimeoutError):
                 return UpdateReply(status=UpdateStatus.UNAVAILABLE)
             else:
                 return UpdateReply.from_json(**raw_reply)
