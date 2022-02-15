@@ -18,9 +18,11 @@ from types import MappingProxyType
 from typing import (Any,
                     Awaitable,
                     Callable,
+                    Collection,
                     Dict,
                     List,
                     Mapping,
+                    MutableSequence,
                     Optional)
 
 from aiohttp import (ClientError,
@@ -44,18 +46,20 @@ from .hints import (NodeId,
                     Protocol,
                     Term,
                     Time)
-from .node_state import (NodeState,
-                         Role,
-                         append_record,
-                         append_records,
-                         follow,
-                         lead,
-                         reset,
-                         start_election,
-                         state_to_nodes_ids_that_accepted_more_records,
-                         update_state_nodes_ids,
-                         update_state_term)
+from .history import (History,
+                      RegularHistory,
+                      SyncHistory,
+                      append_record,
+                      append_records,
+                      to_log_term,
+                      to_nodes_ids_that_accepted_more_records)
 from .record import Record
+from .role import (Candidate,
+                   Follower,
+                   Leader,
+                   Role,
+                   RoleKind,
+                   update_nodes_ids)
 from .utils import (host_to_ip_address,
                     itemize,
                     subtract_mapping,
@@ -461,12 +465,13 @@ class VoteReply:
 
 
 class Node:
-    __slots__ = ('_app', '_cluster_state', '_external_commands_executor',
+    __slots__ = ('_app', '_cluster_state', '_commit_length',
+                 '_external_commands_executor', '_history', '_id',
                  '_internal_processors', '_communication',
                  '_election_duration', '_election_task',
                  '_last_heartbeat_time', '_logger', '_loop', '_patch_routes',
                  '_external_processors', '_reelection_lag', '_reelection_task',
-                 '_state', '_sync_task', '_internal_commands_executor', '_url')
+                 '_role', '_sync_task', '_internal_commands_executor', '_url')
 
     @classmethod
     def from_url(cls,
@@ -477,7 +482,8 @@ class Node:
                  processors: Optional[Mapping[str, Processor]] = None
                  ) -> 'Node':
         id_ = node_url_to_id(url)
-        return cls(NodeState(id_),
+        return cls(id_, RegularHistory([]),
+                   Follower(term=0),
                    DisjointClusterState(ClusterId(),
                                         heartbeat=heartbeat,
                                         nodes_urls={id_: url},
@@ -486,13 +492,18 @@ class Node:
                    processors=processors)
 
     def __init__(self,
-                 _state: NodeState,
+                 _id: NodeId,
+                 _history: History,
+                 _role: Role,
                  _cluster_state: ClusterState,
                  *,
                  logger: Optional[logging.Logger] = None,
                  processors: Optional[Mapping[str, Processor]] = None) -> None:
-        self._cluster_state, self._state = _cluster_state, _state
-        self._url = self._cluster_state.nodes_urls[self._state.id]
+        (
+            self._cluster_state, self._commit_length, self._history, self._id,
+            self._role
+        ) = _cluster_state, 0, _history, _id, _role
+        self._url = self._cluster_state.nodes_urls[self._id]
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = safe_get_event_loop()
         self._app = web.Application()
@@ -546,7 +557,7 @@ class Node:
         for path in self.processors.keys():
             route = self._app.router.add_post(path, self._handle_record)
             resource = route.resource
-            self.logger.debug(f'{self._state.id} has registered '
+            self.logger.debug(f'{self._id} has registered '
                               f'resource {resource.canonical}')
 
     __repr__ = generate_repr(__init__,
@@ -604,14 +615,14 @@ class Node:
                 result = {'error': 'nonexistent node(s) found: '
                                    f'{itemize(nonexistent_nodes_ids)}'}
                 return web.json_response(result)
-            self.logger.debug(f'{self._state.id} initializes '
+            self.logger.debug(f'{self._id} initializes '
                               f'removal of {itemize(nodes_urls_to_delete)}')
             rest_nodes_urls = subtract_mapping(self._cluster_state.nodes_urls,
                                                nodes_urls_to_delete)
         else:
-            self.logger.debug(f'{self._state.id} gets removed')
+            self.logger.debug(f'{self._id} gets removed')
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
-            del rest_nodes_urls[self._state.id]
+            del rest_nodes_urls[self._id]
         call = UpdateCall(
                 cluster_state=DisjointClusterState(
                         generate_cluster_id(),
@@ -619,7 +630,7 @@ class Node:
                         nodes_urls=rest_nodes_urls,
                         stable=False
                 ),
-                node_id=self._state.id
+                node_id=self._id
         )
         reply = await self._process_update_call(call)
         result = {'error': update_status_to_error_message(reply.status)}
@@ -639,7 +650,7 @@ class Node:
                 result = {'error': ('already existing node(s) found: '
                                     f'{itemize(existing_nodes_ids)}')}
                 return web.json_response(result)
-            self.logger.debug(f'{self._state.id} initializes '
+            self.logger.debug(f'{self._id} initializes '
                               f'adding of {itemize(nodes_urls_to_add)}')
             call = UpdateCall(
                     cluster_state=DisjointClusterState(
@@ -651,7 +662,7 @@ class Node:
                             ),
                             stable=False
                     ),
-                    node_id=self._state.id
+                    node_id=self._id
             )
             reply = await self._process_update_call(call)
             result = {'error': update_status_to_error_message(reply.status)}
@@ -665,59 +676,59 @@ class Node:
         call = LogCall(command=Command(action=request.path,
                                        parameters=parameters,
                                        internal=False),
-                       node_id=self._state.id)
+                       node_id=self._id)
         reply = await self._process_log_call(call)
         result = {'error': log_status_to_error_message(reply.status)}
         return web.json_response(result)
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
-        prefix_length = self._state.sent_lengths[node_id]
+        prefix_length = self._history.sent_lengths[node_id]
         call = SyncCall(cluster_id=self._cluster_state.id,
-                        commit_length=self._state.commit_length,
-                        node_id=self._state.id,
+                        commit_length=self._commit_length,
+                        node_id=self._id,
                         prefix_cluster_id
-                        =(self._state.log[prefix_length - 1].cluster_id
+                        =(self._history.log[prefix_length - 1].cluster_id
                           if prefix_length
                           else ClusterId()),
                         prefix_length=prefix_length,
-                        prefix_term=(self._state.log[prefix_length - 1].term
+                        prefix_term=(self._history.log[prefix_length - 1].term
                                      if prefix_length
                                      else 0),
-                        suffix=self._state.log[prefix_length:],
-                        term=self._state.term)
+                        suffix=list(self._history.log[prefix_length:]),
+                        term=self._role.term)
         try:
             raw_reply = await self._send_call(node_id, CallPath.SYNC, call)
         except (ClientError, OSError, ReceiverNotFound):
             return SyncReply(accepted_length=0,
                              node_id=node_id,
                              status=SyncStatus.UNAVAILABLE,
-                             term=self._state.term)
+                             term=self._role.term)
         else:
             return SyncReply.from_json(**raw_reply)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
-        call = VoteCall(node_id=self._state.id,
-                        term=self._state.term,
-                        log_length=len(self._state.log),
-                        log_term=self._state.log_term)
+        call = VoteCall(node_id=self._id,
+                        term=self._role.term,
+                        log_length=len(self._history.log),
+                        log_term=to_log_term(self._history))
         try:
             raw_reply = await self._send_call(node_id, CallPath.VOTE, call)
         except (ClientError, OSError, ReceiverNotFound):
             return VoteReply(node_id=node_id,
                              status=VoteStatus.UNAVAILABLE,
-                             term=self._state.term)
+                             term=self._role.term)
         else:
             return VoteReply.from_json(**raw_reply)
 
     async def _process_log_call(self, call: LogCall) -> LogReply:
-        self.logger.debug(f'{self._state.id} processes {call}')
-        if self._state.leader_node_id is None:
+        self.logger.debug(f'{self._id} processes {call}')
+        if self._role.leader_node_id is None:
             return LogReply(status=LogStatus.UNGOVERNABLE)
-        elif self._state.role is not Role.LEADER:
-            assert self._state.role is Role.FOLLOWER
+        elif self._role.kind is not RoleKind.LEADER:
+            assert self._role.kind is RoleKind.FOLLOWER
             try:
                 raw_reply = await wait_for(
-                        self._send_call(self._state.leader_node_id,
+                        self._send_call(self._role.leader_node_id,
                                         CallPath.LOG, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time)
@@ -729,85 +740,86 @@ class Node:
         elif call.node_id not in self._cluster_state.nodes_ids:
             return LogReply(status=LogStatus.REJECTED)
         else:
-            append_record(self._state,
+            append_record(self._history,
                           Record(cluster_id=self._cluster_state.id,
                                  command=call.command,
-                                 term=self._state.term))
+                                 term=self._role.term))
             await self._sync_followers_once()
             return LogReply(status=LogStatus.SUCCEED)
 
     async def _process_sync_call(self, call: SyncCall) -> SyncReply:
-        self.logger.debug(f'{self._state.id} processes {call}')
+        self.logger.debug(f'{self._id} processes {call}')
         clusters_agree = (self._cluster_state.id.agrees_with(call.cluster_id)
                           if self._cluster_state.id
-                          else not self._state.log)
+                          else not self._history.log)
         if not clusters_agree:
             return SyncReply(accepted_length=0,
-                             node_id=self._state.id,
+                             node_id=self._id,
                              status=SyncStatus.CONFLICT,
-                             term=self._state.term)
+                             term=self._role.term)
         self._last_heartbeat_time = self._to_time()
         self._restart_reelection_timer()
-        if call.term > self._state.term:
-            self._follow(call.node_id)
-            update_state_term(self._state, call.term)
-        elif (call.term == self._state.term
-              and self._state.leader_node_id is None):
+        if call.term > self._role.term:
+            self._withdraw(call.term)
+        if (call.term == self._role.term
+                and self._role.leader_node_id is None):
             self._follow(call.node_id)
         states_agree = (
-                call.term == self._state.term
+                call.term == self._role.term
                 and
-                (len(self._state.log) >= call.prefix_length
+                (len(self._history.log) >= call.prefix_length
                  and (call.prefix_length == 0
-                      or ((self._state.log[call.prefix_length - 1].cluster_id
+                      or ((self._history.log[call.prefix_length - 1].cluster_id
                            == call.prefix_cluster_id)
-                          and (self._state.log[call.prefix_length - 1].term
+                          and (self._history.log[call.prefix_length - 1].term
                                == call.prefix_term))))
         )
         if states_agree:
             self._append_records(call.prefix_length, call.suffix)
-            if call.commit_length > self._state.commit_length:
-                self._commit(self._state.log[self._state.commit_length
-                                             :call.commit_length])
+            if call.commit_length > self._commit_length:
+                self._commit(self._history.log[self._commit_length
+                                               :call.commit_length])
             return SyncReply(accepted_length=(call.prefix_length
                                               + len(call.suffix)),
-                             node_id=self._state.id,
+                             node_id=self._id,
                              status=SyncStatus.SUCCESS,
-                             term=self._state.term)
+                             term=self._role.term)
         else:
             return SyncReply(accepted_length=0,
-                             node_id=self._state.id,
+                             node_id=self._id,
                              status=SyncStatus.FAILURE,
-                             term=self._state.term)
+                             term=self._role.term)
 
     async def _process_sync_reply(self, reply: SyncReply) -> None:
-        self.logger.debug(f'{self._state.id} processes {reply}')
-        if self._state.role is not Role.LEADER:
+        self.logger.debug(f'{self._id} processes {reply}')
+        if self._role.kind is not RoleKind.LEADER:
             pass
         elif (reply.status is SyncStatus.CONFLICT
               or reply.status is SyncStatus.UNAVAILABLE):
             pass
-        elif reply.term == self._state.term:
+        elif reply.term == self._role.term:
             if (reply.status is SyncStatus.SUCCESS
                     and (reply.accepted_length
-                         >= self._state.accepted_lengths[reply.node_id])):
-                self._state.accepted_lengths[reply.node_id] = (
+                         >= self._history.accepted_lengths[reply.node_id])):
+                self._history.accepted_lengths[reply.node_id] = (
                     reply.accepted_length
                 )
-                self._state.sent_lengths[reply.node_id] = reply.accepted_length
+                self._history.sent_lengths[reply.node_id] = (
+                    reply.accepted_length
+                )
                 self._try_commit()
-            elif self._state.sent_lengths[reply.node_id] > 0:
+            elif self._history.sent_lengths[reply.node_id] > 0:
                 assert reply.status is SyncStatus.FAILURE
-                self._state.sent_lengths[reply.node_id] = (
-                        self._state.sent_lengths[reply.node_id] - 1)
+                self._history.sent_lengths[reply.node_id] = (
+                        self._history.sent_lengths[reply.node_id] - 1
+                )
                 await self._sync_follower(reply.node_id)
-        elif reply.term > self._state.term:
-            follow(self._state)
-            update_state_term(self._state, reply.term)
+        elif reply.term > self._role.term:
+            self._withdraw(reply.term)
             self._cancel_election_timer()
 
     async def _process_update_call(self, call: UpdateCall) -> UpdateReply:
-        self.logger.debug(f'{self._state.id} processes {call}')
+        self.logger.debug(f'{self._id} processes {call}')
         if (len(self._cluster_state.nodes_ids) == 1
                 and not call.cluster_state.nodes_ids):
             if self._cluster_state.id:
@@ -815,12 +827,12 @@ class Node:
             else:
                 self._reset()
             return UpdateReply(status=UpdateStatus.SUCCEED)
-        elif self._state.leader_node_id is None:
+        elif self._role.leader_node_id is None:
             return UpdateReply(status=UpdateStatus.UNGOVERNABLE)
-        elif self._state.role is not Role.LEADER:
+        elif self._role.kind is not RoleKind.LEADER:
             try:
                 raw_reply = await wait_for(
-                        self._send_call(self._state.leader_node_id,
+                        self._send_call(self._role.leader_node_id,
                                         CallPath.UPDATE, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time))
@@ -837,53 +849,54 @@ class Node:
         command = Command(action=InternalAction.SEPARATE_CLUSTERS,
                           parameters=next_cluster_state.as_json(),
                           internal=True)
-        append_record(self._state,
+        append_record(self._history,
                       Record(cluster_id=self._cluster_state.id,
                              command=command,
-                             term=self._state.term))
+                             term=self._role.term))
         self._update_cluster_state(next_cluster_state)
         self._restart_sync_timer()
         return UpdateReply(status=UpdateStatus.SUCCEED)
 
     async def _process_vote_call(self, call: VoteCall) -> VoteReply:
-        self.logger.debug(f'{self._state.id} processes {call}')
+        self.logger.debug(f'{self._id} processes {call}')
         if call.node_id not in self._cluster_state.nodes_ids:
-            self.logger.debug(f'{self._state.id} skips voting '
+            self.logger.debug(f'{self._id} skips voting '
                               f'for {call.node_id} '
                               f'because it is not in cluster state')
-            return VoteReply(node_id=self._state.id,
+            return VoteReply(node_id=self._id,
                              status=VoteStatus.REJECTS,
-                             term=self._state.term)
-        elif (self._state.leader_node_id is not None
+                             term=self._role.term)
+        elif (self._role.leader_node_id is not None
               and (self._to_time() - self._last_heartbeat_time
                    < self._cluster_state.heartbeat)):
-            self.logger.debug(f'{self._state.id} ignores voting '
+            assert self._role.kind is not RoleKind.CANDIDATE
+            self.logger.debug(f'{self._id} ignores voting '
                               f'initiated by {call.node_id} '
-                              f'because leader {self._state.leader_node_id} '
+                              f'because leader {self._role.leader_node_id} '
                               f'can be available')
-            return VoteReply(node_id=self._state.id,
+            return VoteReply(node_id=self._id,
                              status=VoteStatus.IGNORES,
-                             term=self._state.term)
-        if call.term > self._state.term:
-            follow(self._state)
-            update_state_term(self._state, call.term)
-        if (call.term == self._state.term
+                             term=self._role.term)
+        if call.term > self._role.term:
+            self._withdraw(call.term)
+        if (call.term == self._role.term
                 and ((call.log_term, call.log_length)
-                     >= (self._state.log_term, len(self._state.log)))
-                and (self._state.supported_node_id is None
-                     or self._state.supported_node_id == call.node_id)):
-            self._state.supported_node_id = call.node_id
-            return VoteReply(node_id=self._state.id,
+                     >= (to_log_term(self._history), len(self._history.log)))
+                and (self._role.supported_node_id is None
+                     or self._role.supported_node_id == call.node_id)):
+            assert self._role.kind is not RoleKind.LEADER
+            self._role.supported_node_id = call.node_id
+            return VoteReply(node_id=self._id,
                              status=VoteStatus.SUPPORTS,
-                             term=self._state.term)
+                             term=self._role.term)
         else:
-            return VoteReply(node_id=self._state.id,
+            return VoteReply(node_id=self._id,
                              status=VoteStatus.OPPOSES,
-                             term=self._state.term)
+                             term=self._role.term)
 
     async def _process_vote_reply(self, reply: VoteReply) -> None:
-        self.logger.debug(f'{self._state.id} processes {reply}')
-        if self._state.role is not Role.CANDIDATE:
+        self.logger.debug(f'{self._id} processes {reply}')
+        if self._role.kind is not RoleKind.CANDIDATE:
             pass
         elif (reply.status is VoteStatus.CONFLICTS
               or reply.status is VoteStatus.IGNORES
@@ -891,29 +904,28 @@ class Node:
             pass
         elif reply.status is VoteStatus.REJECTS:
             assert (not self._cluster_state.stable
-                    and (self._state.id
+                    and (self._id
                          not in self._cluster_state.new.nodes_ids))
-            self._state.rejectors_nodes_ids.add(reply.node_id)
+            self._role.rejectors_nodes_ids.add(reply.node_id)
             if self._cluster_state.new.has_majority(
-                    self._state.rejectors_nodes_ids):
+                    self._role.rejectors_nodes_ids):
                 self._detach()
-        elif (reply.term == self._state.term
+        elif (reply.term == self._role.term
               and reply.status is VoteStatus.SUPPORTS):
-            self._state.supporters_nodes_ids.add(reply.node_id)
+            self._role.supporters_nodes_ids.add(reply.node_id)
             if self._cluster_state.has_majority(
-                    self._state.supporters_nodes_ids):
+                    self._role.supporters_nodes_ids):
                 self._lead()
-        elif reply.term > self._state.term:
+        elif reply.term > self._role.term:
             assert reply.status is VoteStatus.OPPOSES
-            follow(self._state)
-            update_state_term(self._state, reply.term)
+            self._withdraw(reply.term)
             self._cancel_election_timer()
 
     async def _run_election(self) -> None:
-        self.logger.debug(f'{self._state.id} runs election '
-                          f'for term {self._state.term + 1}')
+        self.logger.debug(f'{self._id} runs election '
+                          f'for term {self._role.term + 1}')
         start = self._to_time()
-        start_election(self._state)
+        self._nominate()
         try:
             await wait_for(
                     gather(*[self._agitate_voter(node_id)
@@ -921,13 +933,13 @@ class Node:
                     self._election_duration)
         finally:
             duration = self._to_time() - start
-            self.logger.debug(
-                    f'{self._state.id} election for term {self._state.term} '
-                    f'took {duration}s, '
-                    f'timeout: {self._election_duration}, '
-                    f'role: {self._state.role.name}, '
-                    f'supporters count: '
-                    f'{len(self._state.supporters_nodes_ids)}')
+            self.logger.debug(f'{self._id} election '
+                              f'for term {self._role.term} '
+                              f'took {duration}s, '
+                              f'timeout: {self._election_duration}, '
+                              f'role: {self._role.kind.name}, '
+                              f'supporters count: '
+                              f'{len(self._role.supporters_nodes_ids)}')
             await sleep(self._election_duration - duration)
 
     async def _send_call(self,
@@ -942,16 +954,15 @@ class Node:
         await self._process_sync_reply(reply)
 
     async def _sync_followers(self) -> None:
-        self.logger.info(f'{self._state.id} syncs followers')
-        while self._state.role is Role.LEADER:
+        self.logger.info(f'{self._id} syncs followers')
+        while self._role.kind is RoleKind.LEADER:
             start = self._to_time()
             await self._sync_followers_once()
             duration = self._to_time() - start
             self.logger.debug(
-                    f'{self._state.id} followers\' sync took {duration}s')
-            await sleep(
-                    self._cluster_state.heartbeat - duration
-                    - self._communication.to_expected_broadcast_time())
+                    f'{self._id} followers\' sync took {duration}s')
+            await sleep(self._cluster_state.heartbeat - duration
+                        - self._communication.to_expected_broadcast_time())
 
     async def _sync_followers_once(self) -> None:
         await gather(*[self._sync_follower(node_id)
@@ -960,7 +971,7 @@ class Node:
     def _append_records(self,
                         prefix_length: int,
                         suffix: List[Record]) -> None:
-        log = self._state.log
+        log = self._history.log
         if suffix and len(log) > prefix_length:
             index = min(len(log), prefix_length + len(suffix)) - 1
             if (log[index].term != suffix[index - prefix_length].term
@@ -985,10 +996,10 @@ class Node:
                     )
                     self._update_cluster_state(cluster_state)
                     break
-            append_records(self._state, new_records)
+            append_records(self._history, new_records)
 
     def _cancel_election_timer(self) -> None:
-        self.logger.debug(f'{self._state.id} cancels election timer')
+        self.logger.debug(f'{self._id} cancels election timer')
         self._election_task.cancel()
 
     def _cancel_reelection_timer(self) -> None:
@@ -997,29 +1008,28 @@ class Node:
     def _cancel_sync_timer(self) -> None:
         self._sync_task.cancel()
 
-    def _commit(self, records: List[Record]) -> None:
+    def _commit(self, records: Collection[Record]) -> None:
         assert records
         self._trigger_commands_processing([record.command
                                            for record in records])
-        self._state.commit_length += len(records)
+        self._commit_length += len(records)
 
     def _detach(self) -> None:
-        self.logger.debug(f'{self._state.id} detaches')
+        self.logger.debug(f'{self._id} detaches')
         self._cancel_election_timer()
         self._cancel_reelection_timer()
         self._cancel_sync_timer()
-        self._state.leader_node_id = None
-        self._state.role = Role.FOLLOWER
+        self._withdraw(self._role.term)
         self._update_cluster_state(DisjointClusterState(
                 ClusterId(),
                 heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._state.id: self.url},
+                nodes_urls={self._id: self.url},
                 stable=False
         ))
 
     def _election_timer_callback(self, future: Future) -> None:
         if future.cancelled():
-            self.logger.debug(f'{self._state.id} has election been cancelled')
+            self.logger.debug(f'{self._id} has election been cancelled')
             return
         exception = future.exception()
         if exception is None:
@@ -1027,23 +1037,34 @@ class Node:
             self._start_election_timer()
         elif isinstance(exception, TimeoutError):
             future.cancel()
-            self.logger.debug(f'{self._state.id} has election been timed out')
+            self.logger.debug(f'{self._id} has election been timed out')
             self._start_election_timer()
         else:
             raise exception
 
     def _follow(self, leader_node_id: NodeId) -> None:
-        self.logger.info(f'{self._state.id} follows {leader_node_id} '
-                         f'in term {self._state.term}')
-        follow(self._state, leader_node_id)
+        self.logger.info(f'{self._id} follows {leader_node_id} '
+                         f'in term {self._role.term}')
+        self._history = self._history.to_regular()
+        self._role = Follower(leader_node_id=leader_node_id,
+                              term=self._role.term)
         self._cancel_election_timer()
 
     def _lead(self) -> None:
-        self.logger.info(f'{self._state.id} is leader '
-                         f'of term {self._state.term}')
-        lead(self._state)
+        self.logger.info(f'{self._id} is leader '
+                         f'of term {self._role.term}')
+        self._history = SyncHistory.from_nodes_ids(
+                self._history.log, self._cluster_state.nodes_ids
+        )
+        self._role = Leader(leader_node_id=self._id,
+                            supported_node_id=self._role.supported_node_id,
+                            term=self._role.term)
         self._cancel_election_timer()
         self._start_sync_timer()
+
+    def _nominate(self) -> None:
+        self._history = self._history.to_regular()
+        self._role = Candidate(self._role.term + 1)
 
     def _process_commands(self,
                           commands: List[Command],
@@ -1052,7 +1073,7 @@ class Node:
             try:
                 processor = processors[command.action]
             except KeyError:
-                self.logger.error(f'{self._state.id} has no processor '
+                self.logger.error(f'{self._id} has no processor '
                                   f'"{command.action}"')
                 continue
             try:
@@ -1062,14 +1083,15 @@ class Node:
                                       f'with parameters {command.parameters}:')
 
     def _reset(self) -> None:
-        self.logger.debug(f'{self._state.id} resets')
+        self.logger.debug(f'{self._id} resets')
         assert not self._cluster_state.id
-        reset(self._state)
+        self._history.log.clear()
+        self._withdraw(0)
         force_shutdown_executor(self._external_commands_executor)
         self._external_commands_executor = to_commands_executor()
 
     def _restart_election_timer(self) -> None:
-        self.logger.debug(f'{self._state.id} restarts election timer '
+        self.logger.debug(f'{self._id} restarts election timer '
                           f'after {self._reelection_lag}')
         self._cancel_election_timer()
         self._start_election_timer()
@@ -1083,36 +1105,37 @@ class Node:
         self._start_sync_timer()
 
     def _separate_clusters(self, parameters: Dict[str, Any]) -> None:
-        self.logger.debug(f'{self._state.id} separates clusters')
-        if self._state.role is Role.LEADER:
+        self.logger.debug(f'{self._id} separates clusters')
+        if self._role.kind is RoleKind.LEADER:
             cluster_state = JointClusterState.from_json(**parameters)
             if cluster_state != self._cluster_state:
                 return
             command = Command(action=InternalAction.STABILIZE_CLUSTER,
                               parameters=cluster_state.new.as_json(),
                               internal=True)
-            append_record(self._state,
+            append_record(self._history,
                           Record(cluster_id=self._cluster_state.id,
                                  command=command,
-                                 term=self._state.term))
+                                 term=self._role.term))
             self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
 
     def _solo(self) -> None:
-        self.logger.debug(f'{self._state.id} solos')
+        self.logger.debug(f'{self._id} solos')
         self._update_cluster_state(DisjointClusterState(
                 generate_cluster_id(),
                 heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._state.id: self.url},
+                nodes_urls={self._id: self.url},
                 stable=True
         ))
         self._lead()
 
     def _stabilize_cluster(self, parameters: Dict[str, Any]) -> None:
-        self.logger.debug(f'{self._state.id} stabilizes cluster')
+        self.logger.debug(f'{self._id} stabilizes cluster')
         if self._cluster_state != DisjointClusterState.from_json(**parameters):
             pass
-        elif self._state.id not in self._cluster_state.nodes_ids:
+        elif self._id not in self._cluster_state.nodes_ids:
+            assert self._cluster_state.nodes_ids
             self._detach()
         else:
             self._update_cluster_state(self._cluster_state.stabilize())
@@ -1158,17 +1181,24 @@ class Node:
                                        self._external_processors)
 
     def _try_commit(self) -> None:
-        state = self._state
-        while (state.commit_length < len(state.log)
+        while (self._commit_length < len(self._history.log)
                and self._cluster_state.has_majority(
-                        state_to_nodes_ids_that_accepted_more_records(state))):
-            self._commit([state.log[state.commit_length]])
+                        to_nodes_ids_that_accepted_more_records(
+                                self._history, self._commit_length
+                        )
+                )):
+            self._commit([self._history.log[self._commit_length]])
 
     def _update_cluster_state(self, cluster_state: ClusterState) -> None:
         self._cluster_state = cluster_state
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)
-        update_state_nodes_ids(self._state, cluster_state.nodes_ids)
+        update_nodes_ids(self._role, cluster_state.nodes_ids)
+        self._history = self._history.with_nodes_ids(cluster_state.nodes_ids)
+
+    def _withdraw(self, term: Term) -> None:
+        self._history = self._history.to_regular()
+        self._role = Follower(term=term)
 
 
 def to_commands_executor() -> ThreadPoolExecutor:
