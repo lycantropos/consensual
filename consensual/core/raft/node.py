@@ -495,13 +495,10 @@ class Node:
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = safe_get_event_loop()
         self._app = web.Application()
+        self._external_commands_executor = to_commands_executor()
         self._external_processors = MappingProxyType({}
                                                      if processors is None
                                                      else processors)
-        self._external_commands_executor, self._internal_commands_executor = (
-            self._to_external_commands_executor(),
-            self._to_internal_commands_executor()
-        )
         self._internal_processors = MappingProxyType({
             InternalAction.SEPARATE_CLUSTERS: Node._separate_clusters,
             InternalAction.STABILIZE_CLUSTER: Node._stabilize_cluster
@@ -1076,11 +1073,7 @@ class Node:
         assert not self._cluster_state.id
         reset(self._state)
         force_shutdown_executor(self._external_commands_executor)
-        force_shutdown_executor(self._internal_commands_executor)
-        self._external_commands_executor, self._internal_commands_executor = (
-            self._to_external_commands_executor(),
-            self._to_internal_commands_executor()
-        )
+        self._external_commands_executor = to_commands_executor()
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self._state.id} restarts election timer '
@@ -1144,21 +1137,6 @@ class Node:
     def _start_sync_timer(self) -> None:
         self._sync_task = self._loop.create_task(self._sync_followers())
 
-    def _to_external_commands_executor(self) -> ThreadPoolExecutor:
-        return ThreadPoolExecutor(
-                initializer=set_event_loop_if_none,
-                max_workers=1,
-                thread_name_prefix='external'
-        )
-
-    def _to_internal_commands_executor(self) -> ThreadPoolExecutor:
-        return ThreadPoolExecutor(
-                initializer=set_event_loop,
-                initargs=(self._loop,),
-                max_workers=1,
-                thread_name_prefix='internal'
-        )
-
     def _to_new_duration(self) -> Time:
         broadcast_time = self._communication.to_expected_broadcast_time()
         heartbeat = self._cluster_state.heartbeat
@@ -1179,16 +1157,12 @@ class Node:
         internal_commands = [command
                              for command in commands
                              if command.internal]
+        self._process_commands(internal_commands, self._internal_processors)
         if external_commands:
             self._loop.run_in_executor(self._external_commands_executor,
                                        self._process_commands,
                                        external_commands,
                                        self._external_processors)
-        if internal_commands:
-            self._loop.run_in_executor(self._internal_commands_executor,
-                                       self._process_commands,
-                                       internal_commands,
-                                       self._internal_processors)
 
     def _try_commit(self) -> None:
         state = self._state
@@ -1202,6 +1176,12 @@ class Node:
         update_communication_registry(self._communication,
                                       cluster_state.nodes_urls)
         update_state_nodes_ids(self._state, cluster_state.nodes_ids)
+
+
+def to_commands_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(initializer=set_event_loop_if_none,
+                              max_workers=1,
+                              thread_name_prefix='commands')
 
 
 if sys.version_info >= (3, 9):
