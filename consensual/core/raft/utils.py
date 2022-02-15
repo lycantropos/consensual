@@ -3,6 +3,7 @@ from typing import (Mapping,
                     TypeVar)
 
 host_to_ip_address = host_to_ip_address
+itemize = ', '.join
 
 _Key = TypeVar('_Key')
 _Value = TypeVar('_Value')

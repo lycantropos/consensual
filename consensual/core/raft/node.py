@@ -57,6 +57,7 @@ from .node_state import (NodeState,
                          update_state_term)
 from .record import Record
 from .utils import (host_to_ip_address,
+                    itemize,
                     subtract_mapping,
                     unite_mappings)
 
@@ -600,16 +601,11 @@ class Node:
             nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
                                      - set(self._cluster_state.nodes_ids))
             if nonexistent_nodes_ids:
-                result = {
-                    'error':
-                        ('nonexistent node(s) found: {nodes_ids}'
-                         .format(nodes_ids=', '.join(nonexistent_nodes_ids)))
-                }
+                result = {'error': 'nonexistent node(s) found: '
+                                   f'{itemize(nonexistent_nodes_ids)}'}
                 return web.json_response(result)
-            self.logger.debug(
-                    ('{id} initializes removal of {nodes_ids}'
-                     .format(id=self._state.id,
-                             nodes_ids=', '.join(nodes_urls_to_delete))))
+            self.logger.debug(f'{self._state.id} initializes '
+                              f'removal of {itemize(nodes_urls_to_delete)}')
             rest_nodes_urls = subtract_mapping(self._cluster_state.nodes_urls,
                                                nodes_urls_to_delete)
         else:
@@ -640,15 +636,11 @@ class Node:
             existing_nodes_ids = (nodes_urls_to_add.keys()
                                   & set(self._cluster_state.nodes_ids))
             if existing_nodes_ids:
-                result = {
-                    'error':
-                        ('already existing node(s) found: {nodes_ids}'
-                         .format(nodes_ids=', '.join(existing_nodes_ids)))
-                }
+                result = {'error': ('already existing node(s) found: '
+                                    f'{itemize(existing_nodes_ids)}')}
                 return web.json_response(result)
-            self.logger.debug('{id} initializes adding of {nodes_ids}'
-                              .format(id=self._state.id,
-                                      nodes_ids=', '.join(nodes_urls_to_add)))
+            self.logger.debug(f'{self._state.id} initializes '
+                              f'adding of {itemize(nodes_urls_to_add)}')
             call = UpdateCall(
                     cluster_state=DisjointClusterState(
                             generate_cluster_id(),
