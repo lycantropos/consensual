@@ -42,7 +42,7 @@ class RaftClusterNode:
         self._url_string = str(url)
         self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
-                target=_run_node,
+                target=run_node,
                 args=(self.url, self.processors, self.heartbeat,
                       self.random_seed, self._event))
         self._session = Session()
@@ -149,7 +149,7 @@ class RaftClusterNode:
     def start(self) -> bool:
         self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
-                target=_run_node,
+                target=run_node,
                 args=(self.url, self.processors, self.heartbeat,
                       self.random_seed, self._event))
         self._process.start()
@@ -276,11 +276,11 @@ def to_logger(name: str,
     return logging.getLogger(name)
 
 
-def _run_node(url: URL,
-              processors: Dict[str, Processor],
-              heartbeat: float,
-              random_seed: int,
-              event: multiprocessing.synchronize.Event) -> None:
+def run_node(url: URL,
+             processors: Dict[str, Processor],
+             heartbeat: float,
+             random_seed: int,
+             event: multiprocessing.synchronize.Event) -> None:
     atexit.register(event.set)
     node = Node.from_url(url,
                          heartbeat=heartbeat,
@@ -303,6 +303,13 @@ def _run_node(url: URL,
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 Middleware = Callable[[web.Request, Handler], Awaitable[web.StreamResponse]]
+
+
+def is_resetted_node(node: RaftClusterNode) -> bool:
+    return (not node.old_cluster_state.id
+            and not node.new_cluster_state.id
+            and not node.new_node_state.log
+            and node.new_node_state.term == 0)
 
 
 def to_latency_simulator(*,

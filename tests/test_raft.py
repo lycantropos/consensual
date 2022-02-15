@@ -22,7 +22,8 @@ from hypothesis.strategies import DataObject
 from consensual.core.raft.role import RoleKind
 from consensual.raft import Processor
 from . import strategies
-from .raft_cluster_node import RaftClusterNode
+from .raft_cluster_node import (RaftClusterNode,
+                                is_resetted_node)
 from .utils import (MAX_RUNNING_NODES_COUNT,
                     implication,
                     transpose)
@@ -99,12 +100,9 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def term_monotonicity(self) -> None:
-        old_terms = {node.old_node_state.id: node.old_node_state.term
-                     for node in self._nodes}
-        new_terms = {node.new_node_state.id: node.new_node_state.term
-                     for node in self._nodes}
-        assert all(old_terms.get(node_id, 0) <= new_term
-                   for node_id, new_term in new_terms.items())
+        assert all(node.new_node_state.term >= node.old_node_state.term
+                   or is_resetted_node(node)
+                   for node in self._nodes)
 
     running_nodes = Bundle('running_nodes')
     shutdown_nodes = Bundle('shutdown_nodes')
