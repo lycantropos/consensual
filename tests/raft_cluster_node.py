@@ -285,12 +285,14 @@ class WrappedNode(Node):
                           commands: List[Command],
                           processors: Mapping[str, Processor]) -> None:
         super()._process_commands(commands, processors)
-        if commands[0].internal:
-            assert all(command.internal for command in commands), commands
-            self.processed_internal_commands += commands
-        else:
+        if not commands:
+            return
+        elif commands[0].external:
             assert all(command.external for command in commands), commands
             self.processed_external_commands += commands
+        else:
+            assert all(command.internal for command in commands), commands
+            self.processed_internal_commands += commands
 
 
 def to_logger(name: str,
