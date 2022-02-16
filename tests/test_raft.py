@@ -85,20 +85,33 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def processing_completeness(self) -> None:
+        nodes_external_commands = [[record.command
+                                    for record in node.new_node_state.log
+                                    if record.command.external]
+                                   for node in self._nodes]
+        nodes_internal_commands = [[record.command
+                                    for record in node.new_node_state.log
+                                    if record.command.internal]
+                                   for node in self._nodes]
         assert all(len(node.new_node_state.processed_external_commands)
                    + len(node.new_node_state.processed_internal_commands)
                    <= node.new_node_state.commit_length
                    for node in self._nodes)
-        assert all(all(map(eq, node.new_node_state.processed_external_commands,
-                           [record.command
-                            for record in node.new_node_state.log
-                            if record.command.external]))
-                   and all(map(eq,
-                               node.new_node_state.processed_internal_commands,
-                               [record.command
-                                for record in node.new_node_state.log
-                                if record.command.internal]))
-                   for node in self._nodes)
+        assert all(
+                (len(external_commands)
+                 >= len(node.new_node_state.processed_external_commands))
+                and all(map(eq,
+                            node.new_node_state.processed_external_commands,
+                            external_commands))
+                and (len(internal_commands)
+                     >= len(node.new_node_state.processed_internal_commands))
+                and all(map(eq,
+                            node.new_node_state.processed_internal_commands,
+                            internal_commands))
+                for node, external_commands, internal_commands
+                in zip(self._nodes, nodes_external_commands,
+                       nodes_internal_commands)
+        )
 
     @invariant()
     def election_safety(self) -> None:
