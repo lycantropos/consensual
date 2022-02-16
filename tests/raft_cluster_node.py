@@ -10,6 +10,8 @@ from typing import (Any,
                     Awaitable,
                     Callable,
                     Dict,
+                    List,
+                    Mapping,
                     Optional,
                     Sequence)
 
@@ -21,6 +23,7 @@ from requests import (Response,
                       Session)
 from yarl import URL
 
+from consensual.core.raft.command import Command
 from consensual.raft import (Node,
                              Processor)
 from .raft_cluster_state import RaftClusterState
@@ -253,10 +256,10 @@ def run_node(url: URL,
              random_seed: int,
              event: multiprocessing.synchronize.Event) -> None:
     atexit.register(event.set)
-    node = Node.from_url(url,
-                         heartbeat=heartbeat,
-                         logger=to_logger(url.authority),
-                         processors=processors)
+    node = WrappedNode.from_url(url,
+                                heartbeat=heartbeat,
+                                logger=to_logger(url.authority),
+                                processors=processors)
     node._app.router.add_get('/states', to_states_handler(node))
     node._app.middlewares.append(
             to_latency_simulator(max_delay=(heartbeat
@@ -270,6 +273,24 @@ def run_node(url: URL,
                 port=url.port,
                 loop=node._loop,
                 print=lambda message: event.set() or print(message))
+
+
+class WrappedNode(Node):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.processed_external_commands = []
+        self.processed_internal_commands = []
+
+    def _process_commands(self,
+                          commands: List[Command],
+                          processors: Mapping[str, Processor]) -> None:
+        super()._process_commands(commands, processors)
+        if commands[0].internal:
+            assert all(command.internal for command in commands), commands
+            self.processed_internal_commands += commands
+        else:
+            assert all(command.external for command in commands), commands
+            self.processed_external_commands += commands
 
 
 def to_logger(name: str,
@@ -330,12 +351,11 @@ def to_latency_simulator(*,
     return middleware
 
 
-def to_states_appender(node: Node) -> Middleware:
+def to_states_appender(node: WrappedNode) -> Middleware:
     @web.middleware
     async def middleware(request: web.Request,
                          handler: Handler) -> web.StreamResponse:
-        if request.method not in (hdrs.METH_POST,
-                                  hdrs.METH_DELETE):
+        if request.method not in (hdrs.METH_DELETE, hdrs.METH_POST):
             return await handler(request)
         states_before = to_raw_states(node)
         result: web.Response = await handler(request)
@@ -348,7 +368,7 @@ def to_states_appender(node: Node) -> Middleware:
     return middleware
 
 
-def to_states_handler(node: Node) -> Handler:
+def to_states_handler(node: WrappedNode) -> Handler:
     async def handler(request: web.Request) -> web.Response:
         return web.json_response(to_raw_states(node))
 
@@ -363,15 +383,23 @@ def to_raw_cluster_state(node: Node) -> Dict[str, Any]:
             'stable': state.stable}
 
 
-def to_raw_node_state(node: Node) -> Dict[str, Any]:
+def to_raw_node_state(node: WrappedNode) -> Dict[str, Any]:
     return {'id': node._id,
             'commit_length': node._commit_length,
             'leader_node_id': node._role.leader_node_id,
             'log': [record.as_json() for record in node._history.log],
+            'processed_external_commands': [
+                command.as_json()
+                for command in node.processed_external_commands
+            ],
+            'processed_internal_commands': [
+                command.as_json()
+                for command in node.processed_internal_commands
+            ],
             'role_kind': node._role.kind,
             'term': node._role.term}
 
 
-def to_raw_states(node: Node) -> Dict[str, Any]:
+def to_raw_states(node: WrappedNode) -> Dict[str, Any]:
     return {'cluster': to_raw_cluster_state(node),
             'node': to_raw_node_state(node)}

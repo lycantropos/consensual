@@ -84,6 +84,23 @@ class RaftNetwork(RuleBasedStateMachine):
                    for records in same_records.values())
 
     @invariant()
+    def processing_completeness(self) -> None:
+        assert all(len(node.new_node_state.processed_external_commands)
+                   + len(node.new_node_state.processed_internal_commands)
+                   <= node.new_node_state.commit_length
+                   for node in self._nodes)
+        assert all(all(map(eq, node.new_node_state.processed_external_commands,
+                           [record.command
+                            for record in node.new_node_state.log
+                            if record.command.external]))
+                   and all(map(eq,
+                               node.new_node_state.processed_internal_commands,
+                               [record.command
+                                for record in node.new_node_state.log
+                                if record.command.internal]))
+                   for node in self._nodes)
+
+    @invariant()
     def election_safety(self) -> None:
         clusters_leaders_counts = defaultdict(Counter)
         for node in self._nodes:
