@@ -294,6 +294,11 @@ class WrappedNode(Node):
             assert all(command.internal for command in commands), commands
             self.processed_internal_commands += commands
 
+    def _reset(self) -> None:
+        super()._reset()
+        self.processed_external_commands.clear()
+        self.processed_internal_commands.clear()
+
 
 def to_logger(name: str,
               *,
