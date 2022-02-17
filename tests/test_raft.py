@@ -37,18 +37,10 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def commit_length_monotonicity(self) -> None:
-        old_commit_lengths = {
-            node.old_node_state.id: node.old_node_state.commit_length
-            for node in self._nodes
-        }
-        new_commit_lengths = {
-            node.new_node_state.id: node.new_node_state.commit_length
-            for node in self._nodes
-        }
-        assert all(
-                old_commit_lengths.get(node_id, 0) <= new_commit_length
-                for node_id, new_commit_length in new_commit_lengths.items()
-        )
+        assert all((node.old_node_state.commit_length
+                    <= node.new_node_state.commit_length)
+                   or is_resetted_node(node)
+                   for node in self._nodes)
 
     @invariant()
     def leader_append_only(self) -> None:
