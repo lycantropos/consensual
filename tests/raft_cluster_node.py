@@ -284,20 +284,22 @@ class WrappedNode(Node):
     def _process_commands(self,
                           commands: List[Command],
                           processors: Mapping[str, Processor]) -> None:
+        assert all(command.external is commands[0].external
+                   for command in commands)
+        processed_commands = ((self.processed_external_commands
+                               if commands[0].external
+                               else self.processed_internal_commands)
+                              if commands
+                              else None)
         super()._process_commands(commands, processors)
         if not commands:
             return
-        elif commands[0].external:
-            assert all(command.external for command in commands), commands
-            self.processed_external_commands += commands
-        else:
-            assert all(command.internal for command in commands), commands
-            self.processed_internal_commands += commands
+        processed_commands += commands
 
     def _reset(self) -> None:
         super()._reset()
-        self.processed_external_commands.clear()
-        self.processed_internal_commands.clear()
+        self.processed_external_commands = []
+        self.processed_internal_commands = []
 
 
 def to_logger(name: str,
