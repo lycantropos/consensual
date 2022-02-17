@@ -1084,6 +1084,7 @@ class Node:
     def _reset(self) -> None:
         self.logger.debug(f'{self._id} resets')
         assert not self._cluster_state.id
+        self._commit_length = 0
         self._history.log.clear()
         self._withdraw(0)
         force_shutdown_executor(self._external_commands_executor)
