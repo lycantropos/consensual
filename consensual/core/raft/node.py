@@ -621,7 +621,7 @@ class Node:
         else:
             self.logger.debug(f'{self._id} gets removed')
             rest_nodes_urls = dict(self._cluster_state.nodes_urls)
-            del rest_nodes_urls[self._id]
+            rest_nodes_urls.pop(self._id, None)
         call = UpdateCall(
                 cluster_state=DisjointClusterState(
                         generate_cluster_id(),
