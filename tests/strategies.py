@@ -73,7 +73,8 @@ running_nodes_parameters = strategies.tuples(hosts, ports_ranges,
 running_nodes_parameters_lists = strategies.lists(
         running_nodes_parameters,
         min_size=1,
-        max_size=MAX_RUNNING_NODES_COUNT)
+        max_size=MAX_RUNNING_NODES_COUNT
+)
 
 
 def to_nodes_with_log_arguments(
