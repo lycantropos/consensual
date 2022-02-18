@@ -464,13 +464,13 @@ class VoteReply:
 
 
 class Node:
-    __slots__ = ('_app', '_cluster_state', '_commit_length',
-                 '_external_commands_executor', '_history', '_id',
-                 '_internal_processors', '_communication',
+    __slots__ = ('_app', '_cluster_state', '_commit_length', '_communication',
                  '_election_duration', '_election_task',
-                 '_last_heartbeat_time', '_logger', '_loop', '_patch_routes',
-                 '_external_processors', '_reelection_lag', '_reelection_task',
-                 '_role', '_sync_task', '_internal_commands_executor', '_url')
+                 '_external_commands_executor', '_external_commands_loop',
+                 '_external_processors', '_history', '_id',
+                 '_internal_processors', '_last_heartbeat_time', '_logger',
+                 '_loop', '_patch_routes', '_reelection_lag',
+                 '_reelection_task', '_role', '_sync_task', '_url')
 
     @classmethod
     def from_url(cls,
@@ -506,7 +506,10 @@ class Node:
         self._logger = logging.getLogger() if logger is None else logger
         self._loop = safe_get_event_loop()
         self._app = web.Application()
-        self._external_commands_executor = to_commands_executor()
+        self._external_commands_loop = new_event_loop()
+        self._external_commands_executor = to_commands_executor(
+                self._external_commands_loop
+        )
         self._external_processors = MappingProxyType({}
                                                      if processors is None
                                                      else processors)
@@ -1088,7 +1091,9 @@ class Node:
         self._history.log.clear()
         self._withdraw(0)
         force_shutdown_executor(self._external_commands_executor)
-        self._external_commands_executor = to_commands_executor()
+        self._external_commands_executor = to_commands_executor(
+                self._external_commands_loop
+        )
 
     def _restart_election_timer(self) -> None:
         self.logger.debug(f'{self._id} restarts election timer '
@@ -1201,16 +1206,17 @@ class Node:
         self._role = Follower(term=term)
 
 
-def to_commands_executor() -> ThreadPoolExecutor:
-    return ThreadPoolExecutor(initializer=set_event_loop_if_none,
+def to_commands_executor(loop: AbstractEventLoop) -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(initializer=set_event_loop,
+                              initargs=(loop,),
                               max_workers=1,
                               thread_name_prefix='commands')
 
 
 if sys.version_info >= (3, 9):
     def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
-        executor.shutdown(wait=False,
-                          cancel_futures=True)
+        executor.shutdown(cancel_futures=True,
+                          wait=False)
 else:
     def force_shutdown_executor(executor: ThreadPoolExecutor) -> None:
         executor.shutdown(wait=False)
@@ -1243,13 +1249,6 @@ def safe_get_event_loop() -> AbstractEventLoop:
         result = new_event_loop()
         set_event_loop(result)
     return result
-
-
-def set_event_loop_if_none() -> None:
-    try:
-        get_event_loop()
-    except RuntimeError:
-        set_event_loop(new_event_loop())
 
 
 def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:
