@@ -1,5 +1,6 @@
 import string
 import time
+from asyncio import get_event_loop
 from operator import add
 from typing import (Any,
                     List,
@@ -37,6 +38,10 @@ def waiting_processor(node: Node, parameters: float) -> None:
     time.sleep(parameters)
 
 
+def asyncio_waiting_processor(node: Node, parameters: float) -> None:
+    get_event_loop().run_until_complete(time.sleep(parameters))
+
+
 plain_paths_letters = strategies.characters(
         whitelist_categories=['Ll', 'Lu', 'Nd', 'Nl', 'No']
 )
@@ -58,7 +63,8 @@ base_paths = (plain_base_paths
                                                        to_longer_base_paths),
                                   plain_base_paths))
 paths = base_paths.map('/{}'.format)
-processors_parameters = {waiting_processor: strategies.floats(-10, 10)}
+processors_parameters = {waiting_processor: strategies.floats(-10, 10),
+                         asyncio_waiting_processor: strategies.floats(-10, 10)}
 processors = strategies.sampled_from(list(processors_parameters))
 processors_dicts = strategies.dictionaries(keys=paths,
                                            values=processors)
