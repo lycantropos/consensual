@@ -186,7 +186,8 @@ class RaftNetwork(RuleBasedStateMachine):
                                             is RoleKind.LEADER,
                                             node.old_cluster_state.stable))
                 )
-                and implication(len(node.old_cluster_state.nodes_ids) == 1
+                and implication((node.old_cluster_state.nodes_ids
+                                 == [node.old_node_state.id])
                                 or ((node.old_node_state.role_kind
                                      is RoleKind.LEADER)
                                     and node.old_cluster_state.stable),
@@ -218,7 +219,8 @@ class RaftNetwork(RuleBasedStateMachine):
                 and implication(
                         (source_node.old_node_state.id
                          == target_node.old_node_state.id)
-                        if len(target_node.old_cluster_state.nodes_ids) == 1
+                        if (target_node.old_cluster_state.nodes_ids
+                            == [target_node.old_node_state.id])
                         else
                         ((target_node.old_node_state.role_kind
                           is RoleKind.LEADER)
