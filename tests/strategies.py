@@ -1,6 +1,7 @@
 import string
 import time
-from asyncio import get_event_loop
+from asyncio import (get_event_loop,
+                     sleep)
 from operator import add
 from typing import (Any,
                     List,
@@ -39,7 +40,7 @@ def waiting_processor(node: Node, parameters: float) -> None:
 
 
 def asyncio_waiting_processor(node: Node, parameters: float) -> None:
-    get_event_loop().run_until_complete(time.sleep(parameters))
+    get_event_loop().run_until_complete(sleep(parameters))
 
 
 plain_paths_letters = strategies.characters(
