@@ -113,9 +113,10 @@ class Communication(Generic[_Receiver, _Path]):
             try:
                 async with self._session.ws_connect(
                         receiver_url,
+                        heartbeat=self.heartbeat,
                         method=self.HTTP_METHOD,
-                        timeout=self.heartbeat,
-                        heartbeat=self.heartbeat) as connection:
+                        timeout=self.heartbeat
+                ) as connection:
                     message_start = to_time()
                     try:
                         await connection.send_json({'path': path,
