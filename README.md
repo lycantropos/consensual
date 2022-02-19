@@ -9,8 +9,8 @@ consensual
 Summary
 -------
 
-`consensual` is a pure-Python library for defining network of machines 
-running in a consistent fault-tolerant manner by implementing state-of-the-art 
+`consensual` is a pure-Python library for defining network of nodes
+running in a consistent fault-tolerant manner by implementing state-of-the-art
 [`Raft` consensus algorithm](https://raft.github.io/).
 
 Currently, next features are implemented & property-based tested
