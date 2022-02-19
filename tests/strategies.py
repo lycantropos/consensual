@@ -11,7 +11,6 @@ from typing import (Any,
 from hypothesis import strategies
 from hypothesis.strategies import SearchStrategy
 
-from consensual.raft import Node
 from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_RUNNING_NODES_COUNT
 
@@ -35,12 +34,12 @@ ports_ranges = strategies.builds(to_ports_range,
 random_seeds = strategies.integers()
 
 
-def waiting_processor(node: Node, parameters: float) -> None:
-    time.sleep(parameters)
-
-
-def asyncio_waiting_processor(node: Node, parameters: float) -> None:
+def asyncio_waiting_processor(parameters: float) -> None:
     get_event_loop().run_until_complete(sleep(parameters))
+
+
+def waiting_processor(parameters: float) -> None:
+    time.sleep(parameters)
 
 
 plain_paths_letters = strategies.characters(
