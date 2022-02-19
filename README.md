@@ -23,7 +23,7 @@ Currently, next features are implemented & property-based tested
   resulting in running as a cluster-by-itself,
 - separate node state resetting with history deletion.
 
-Next to implement features will be
+Next crucial features to implement will be
 - persistence,
 - log compaction
   (described in section 7 of [the article](https://raft.github.io/raft.pdf)).
