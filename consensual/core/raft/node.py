@@ -1080,7 +1080,7 @@ class Node:
                                   f'"{command.action}"')
                 continue
             try:
-                processor(self, command.parameters)
+                processor(command.parameters)
             except Exception:
                 self.logger.exception(f'Failed processing "{command.action}" '
                                       f'with parameters {command.parameters}:')
