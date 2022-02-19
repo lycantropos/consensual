@@ -6,6 +6,30 @@ consensual
 [![](https://img.shields.io/github/license/lycantropos/consensual.svg)](https://github.com/lycantropos/consensual/blob/master/LICENSE "License")
 [![](https://badge.fury.io/py/consensual.svg)](https://badge.fury.io/py/consensual "PyPI")
 
+Summary
+-------
+
+`consensual` is a pure-Python library for defining network of machines 
+running in a consistent fault-tolerant manner by implementing state-of-the-art 
+[`Raft` consensus algorithm](https://raft.github.io/).
+
+Currently, next features are implemented & property-based tested
+- leader election & log replication
+  (described in section 5 of [the article](https://raft.github.io/raft.pdf)),
+- cluster membership changes
+  (described in section 6 of [the article](https://raft.github.io/raft.pdf)),
+  namely consensual addition & removal of nodes,
+- "solo mode": non-consensual separation of a node
+  resulting in running as a cluster-by-itself,
+- separate node state resetting with history deletion.
+
+Next to implement features will be
+- persistence,
+- log compaction
+  (described in section 7 of [the article](https://raft.github.io/raft.pdf)).
+
+---
+
 In what follows `python` is an alias for `python3.7`
 or any later version (`python3.8` and so on).
 
