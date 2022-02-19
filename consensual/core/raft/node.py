@@ -520,7 +520,8 @@ class Node:
         self._communication: Communication[NodeId, CallPath] = Communication(
                 heartbeat=self._cluster_state.heartbeat,
                 paths=list(CallPath),
-                registry=self._cluster_state.nodes_urls)
+                registry=self._cluster_state.nodes_urls
+        )
         self._election_duration = 0
         self._election_task = self._loop.create_future()
         self._last_heartbeat_time = -self._cluster_state.heartbeat
