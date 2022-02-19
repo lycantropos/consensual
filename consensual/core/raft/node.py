@@ -839,7 +839,8 @@ class Node:
                         self._send_call(self._role.leader_node_id,
                                         CallPath.UPDATE, call),
                         self._reelection_lag
-                        - (self._to_time() - self._last_heartbeat_time))
+                        - (self._to_time() - self._last_heartbeat_time)
+                )
             except (ClientError, OSError, ReceiverNotFound, TimeoutError):
                 return UpdateReply(status=UpdateStatus.UNAVAILABLE)
             else:
@@ -1156,7 +1157,8 @@ class Node:
     def _start_reelection_timer(self) -> None:
         self._reelection_lag = self._to_new_duration()
         self._reelection_task = self._loop.call_later(
-                self._reelection_lag, self._restart_election_timer)
+                self._reelection_lag, self._restart_election_timer
+        )
 
     def _start_sync_timer(self) -> None:
         self._sync_task = self._loop.create_task(self._sync_followers())
