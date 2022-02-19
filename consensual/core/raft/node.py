@@ -725,6 +725,7 @@ class Node:
     async def _process_log_call(self, call: LogCall) -> LogReply:
         self.logger.debug(f'{self._id} processes {call}')
         if self._role.leader_node_id is None:
+            assert self._role.kind is not RoleKind.LEADER
             return LogReply(status=LogStatus.UNGOVERNABLE)
         elif self._role.kind is not RoleKind.LEADER:
             assert self._role.kind is RoleKind.FOLLOWER
