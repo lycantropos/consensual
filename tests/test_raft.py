@@ -233,18 +233,6 @@ class RaftNetwork(RuleBasedStateMachine):
                 in zip(source_nodes, target_nodes, errors)
         )
 
-    @rule(nodes=running_nodes)
-    def initialize_nodes(self, nodes: List[RaftClusterNode]) -> None:
-        errors = list(self._executor.map(RaftClusterNode.initialize, nodes))
-        assert all(error is None for error in errors)
-        assert all(
-                node.new_cluster_state.id
-                and node.new_node_state.id in node.new_cluster_state.nodes_ids
-                and len(node.new_cluster_state.nodes_ids) == 1
-                and node.new_node_state.role_kind is RoleKind.LEADER
-                for node in nodes
-        )
-
     @rule(data=strategies.data_objects,
           nodes=running_nodes)
     def log(self, data: DataObject, nodes: List[RaftClusterNode]) -> None:
@@ -285,6 +273,18 @@ class RaftNetwork(RuleBasedStateMachine):
                        for node in self._nodes
                        if node not in shutdown_nodes]
         return nodes
+
+    @rule(nodes=running_nodes)
+    def solo_nodes(self, nodes: List[RaftClusterNode]) -> None:
+        errors = list(self._executor.map(RaftClusterNode.solo, nodes))
+        assert all(error is None for error in errors)
+        assert all(
+                node.new_cluster_state.id
+                and node.new_node_state.id in node.new_cluster_state.nodes_ids
+                and len(node.new_cluster_state.nodes_ids) == 1
+                and node.new_node_state.role_kind is RoleKind.LEADER
+                for node in nodes
+        )
 
     def is_not_empty(self) -> bool:
         return bool(self._nodes)

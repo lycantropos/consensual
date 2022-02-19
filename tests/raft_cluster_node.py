@@ -116,7 +116,7 @@ class RaftClusterNode:
         self._update_states(response_data['states'])
         return response_data['result']['error']
 
-    def initialize(self) -> None:
+    def solo(self) -> None:
         response = requests.post(self._url_string)
         response.raise_for_status()
         response_data = response.json()
