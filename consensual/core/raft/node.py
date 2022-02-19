@@ -1,5 +1,3 @@
-import enum
-import json
 import logging.config
 import random
 import sys
@@ -13,36 +11,27 @@ from asyncio import (AbstractEventLoop,
                      set_event_loop,
                      sleep,
                      wait_for)
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from typing import (Any,
-                    Awaitable,
-                    Callable,
                     Collection,
                     Dict,
                     List,
                     Mapping,
                     Optional)
 
-from aiohttp import (ClientError,
-                     web,
-                     web_ws)
 from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
-from .cluster_id import (ClusterId,
-                         RawClusterId)
+from .cluster_id import ClusterId
 from .cluster_state import (ClusterState,
                             DisjointClusterState,
                             JointClusterState)
 from .command import Command
-from .communication import (Communication,
-                            ReceiverNotFound,
-                            update_communication_registry)
 from .hints import (NodeId,
                     Processor,
-                    Protocol,
                     Term,
                     Time)
 from .history import (History,
@@ -52,6 +41,19 @@ from .history import (History,
                       append_records,
                       to_log_term,
                       to_nodes_ids_that_accepted_more_records)
+from .messages import (CallKey,
+                       LogCall,
+                       LogReply,
+                       LogStatus,
+                       SyncCall,
+                       SyncReply,
+                       SyncStatus,
+                       UpdateCall,
+                       UpdateReply,
+                       UpdateStatus,
+                       VoteCall,
+                       VoteReply,
+                       VoteStatus)
 from .record import Record
 from .role import (Candidate,
                    Follower,
@@ -59,6 +61,8 @@ from .role import (Candidate,
                    Role,
                    RoleKind,
                    update_nodes_ids)
+from .sender import (ReceiverUnavailable,
+                     Sender)
 from .utils import (host_to_ip_address,
                     itemize,
                     subtract_mapping,
@@ -72,405 +76,14 @@ class InternalAction:
     assert STABILIZE_CLUSTER and not STABILIZE_CLUSTER.startswith('/')
 
 
-class Call(Protocol):
-    def as_json(self) -> Dict[str, Any]:
-        return {}
-
-
-class CallPath(enum.IntEnum):
-    LOG = 0
-    SYNC = 1
-    UPDATE = 2
-    VOTE = 3
-
-
-class LogCall:
-    __slots__ = '_command', '_node_id'
-
-    def __new__(cls, *, command: Command, node_id: NodeId) -> 'LogCall':
-        self = super().__new__(cls)
-        self._command, self._node_id = command, node_id
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def command(self) -> Command:
-        return self._command
-
-    @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @classmethod
-    def from_json(cls,
-                  *,
-                  command: Dict[str, Any],
-                  node_id: NodeId) -> 'LogCall':
-        return cls(command=Command.from_json(**command),
-                   node_id=node_id)
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'command': self.command.as_json(),
-                'node_id': self.node_id}
-
-
-class LogStatus(enum.IntEnum):
-    REJECTED = enum.auto()
-    SUCCEED = enum.auto()
-    UNAVAILABLE = enum.auto()
-    UNGOVERNABLE = enum.auto()
-
-
-class LogReply:
-    __slots__ = '_status',
-
-    def __new__(cls, status: LogStatus) -> 'LogReply':
-        self = super().__new__(cls)
-        self._status = status
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def status(self) -> LogStatus:
-        return self._status
-
-    @classmethod
-    def from_json(cls, status: int) -> 'LogReply':
-        return cls(LogStatus(status))
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'status': int(self.status)}
-
-
-class SyncCall:
-    __slots__ = ('_cluster_id', '_commit_length', '_node_id',
-                 '_prefix_cluster_id', '_prefix_length', '_prefix_term',
-                 '_suffix', '_term')
-
-    def __new__(cls,
-                *,
-                cluster_id: ClusterId,
-                commit_length: int,
-                node_id: NodeId,
-                prefix_cluster_id: ClusterId,
-                prefix_length: int,
-                prefix_term: Term,
-                suffix: List[Record],
-                term: Term) -> 'SyncCall':
-        self = super().__new__(cls)
-        (
-            self._cluster_id, self._commit_length, self._node_id,
-            self._prefix_cluster_id, self._prefix_length, self._prefix_term,
-            self._suffix, self._term
-        ) = (
-            cluster_id, commit_length, node_id, prefix_cluster_id,
-            prefix_length, prefix_term, suffix, term,
-        )
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def cluster_id(self) -> ClusterId:
-        return self._cluster_id
-
-    @property
-    def commit_length(self) -> int:
-        return self._commit_length
-
-    @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @property
-    def prefix_cluster_id(self) -> ClusterId:
-        return self._prefix_cluster_id
-
-    @property
-    def prefix_length(self) -> int:
-        return self._prefix_length
-
-    @property
-    def prefix_term(self) -> Term:
-        return self._prefix_term
-
-    @property
-    def suffix(self) -> List[Record]:
-        return self._suffix
-
-    @property
-    def term(self) -> Term:
-        return self._term
-
-    @classmethod
-    def from_json(cls,
-                  *,
-                  cluster_id: RawClusterId,
-                  commit_length: int,
-                  node_id: NodeId,
-                  prefix_cluster_id: RawClusterId,
-                  prefix_length: int,
-                  prefix_term: Term,
-                  suffix: List[Dict[str, Any]],
-                  term: Term) -> 'SyncCall':
-        return cls(cluster_id=ClusterId.from_json(cluster_id),
-                   commit_length=commit_length,
-                   node_id=node_id,
-                   prefix_cluster_id=ClusterId.from_json(prefix_cluster_id),
-                   prefix_length=prefix_length,
-                   prefix_term=prefix_term,
-                   suffix=[Record.from_json(**record) for record in suffix],
-                   term=term)
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'cluster_id': self.cluster_id.as_json(),
-                'commit_length': self.commit_length,
-                'node_id': self.node_id,
-                'prefix_cluster_id': self.prefix_cluster_id.as_json(),
-                'prefix_length': self.prefix_length,
-                'prefix_term': self.prefix_term,
-                'suffix': [record.as_json() for record in self.suffix],
-                'term': self.term}
-
-
-class SyncStatus(enum.IntEnum):
-    CONFLICT = enum.auto()
-    FAILURE = enum.auto()
-    SUCCESS = enum.auto()
-    UNAVAILABLE = enum.auto()
-
-
-class SyncReply:
-    __slots__ = '_accepted_length', '_node_id', '_status', '_term'
-
-    def __new__(cls,
-                *,
-                accepted_length: int,
-                node_id: NodeId,
-                status: SyncStatus,
-                term: Term) -> 'SyncReply':
-        self = super().__new__(cls)
-        self._accepted_length, self._node_id, self._status, self._term = (
-            accepted_length, node_id, status, term
-        )
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def accepted_length(self) -> int:
-        return self._accepted_length
-
-    @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @property
-    def status(self) -> SyncStatus:
-        return self._status
-
-    @property
-    def term(self) -> Term:
-        return self._term
-
-    @classmethod
-    def from_json(cls,
-                  *,
-                  accepted_length: int,
-                  node_id: NodeId,
-                  status: int,
-                  term: Term) -> 'SyncReply':
-        return cls(accepted_length=accepted_length,
-                   node_id=node_id,
-                   status=SyncStatus(status),
-                   term=term)
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'accepted_length': self.accepted_length,
-                'node_id': self.node_id,
-                'status': int(self.status),
-                'term': self.term}
-
-
-class UpdateCall:
-    __slots__ = '_cluster_state', '_node_id'
-
-    def __new__(cls,
-                *,
-                cluster_state: DisjointClusterState,
-                node_id: NodeId) -> 'UpdateCall':
-        self = super().__new__(cls)
-        self._cluster_state, self._node_id = cluster_state, node_id
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def cluster_state(self) -> DisjointClusterState:
-        return self._cluster_state
-
-    @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @classmethod
-    def from_json(cls,
-                  *,
-                  cluster_state: Dict[str, Any],
-                  node_id: NodeId) -> 'UpdateCall':
-        return cls(
-                cluster_state=DisjointClusterState.from_json(**cluster_state),
-                node_id=node_id
-        )
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'cluster_state': self.cluster_state.as_json(),
-                'node_id': self.node_id}
-
-
-class UpdateStatus(enum.IntEnum):
-    REJECTED = enum.auto()
-    SUCCEED = enum.auto()
-    UNAVAILABLE = enum.auto()
-    UNGOVERNABLE = enum.auto()
-    UNSTABLE = enum.auto()
-
-
-class UpdateReply:
-    __slots__ = '_status',
-
-    def __new__(cls, status: UpdateStatus) -> 'UpdateReply':
-        self = super().__new__(cls)
-        self._status = status
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def status(self) -> UpdateStatus:
-        return self._status
-
-    @classmethod
-    def from_json(cls, status: int) -> 'UpdateReply':
-        return cls(UpdateStatus(status))
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'status': int(self.status)}
-
-
-class VoteCall:
-    __slots__ = '_log_length', '_log_term', '_node_id', '_term'
-
-    def __new__(cls,
-                *,
-                log_length: int,
-                log_term: Term,
-                node_id: NodeId,
-                term: Term) -> 'VoteCall':
-        self = super().__new__(cls)
-        self._log_length, self._log_term, self._node_id, self._term = (
-            log_length, log_term, node_id, term
-        )
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def log_length(self) -> int:
-        return self._log_length
-
-    @property
-    def log_term(self) -> Term:
-        return self._log_term
-
-    @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @property
-    def term(self) -> Term:
-        return self._term
-
-    @classmethod
-    def from_json(cls,
-                  *,
-                  log_length: int,
-                  log_term: Term,
-                  node_id: NodeId,
-                  term: Term) -> 'VoteCall':
-        return cls(log_length=log_length,
-                   log_term=log_term,
-                   node_id=node_id,
-                   term=term)
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'log_length': self.log_length,
-                'log_term': self.log_term,
-                'node_id': self.node_id,
-                'term': self.term}
-
-
-class VoteStatus(enum.IntEnum):
-    CONFLICTS = enum.auto()
-    IGNORES = enum.auto()
-    OPPOSES = enum.auto()
-    REJECTS = enum.auto()
-    SUPPORTS = enum.auto()
-    UNAVAILABLE = enum.auto()
-
-
-class VoteReply:
-    __slots__ = '_node_id', '_status', '_term'
-
-    def __new__(cls,
-                *,
-                node_id: NodeId,
-                status: VoteStatus,
-                term: Term) -> 'VoteReply':
-        self = super().__new__(cls)
-        self._node_id, self._status, self._term = node_id, status, term
-        return self
-
-    __repr__ = generate_repr(__new__)
-
-    @property
-    def node_id(self) -> NodeId:
-        return self._node_id
-
-    @property
-    def status(self) -> VoteStatus:
-        return self._status
-
-    @property
-    def term(self) -> Term:
-        return self._term
-
-    @classmethod
-    def from_json(cls,
-                  *,
-                  node_id: NodeId,
-                  status: int,
-                  term: Term) -> 'VoteReply':
-        return cls(node_id=node_id,
-                   status=VoteStatus(status),
-                   term=term)
-
-    def as_json(self) -> Dict[str, Any]:
-        return {'node_id': self.node_id,
-                'status': int(self.status),
-                'term': self.term}
-
-
 class Node:
-    __slots__ = ('_app', '_cluster_state', '_commit_length', '_communication',
-                 '_election_duration', '_election_task',
-                 '_external_commands_executor', '_external_commands_loop',
-                 '_external_processors', '_history', '_id',
-                 '_internal_processors', '_last_heartbeat_time', '_logger',
-                 '_loop', '_patch_routes', '_reelection_lag',
-                 '_reelection_task', '_role', '_sync_task', '_url')
+    __slots__ = ('_cluster_state', '_commit_length', '_election_duration',
+                 '_election_task', '_external_commands_executor',
+                 '_external_commands_loop', '_external_processors', '_history',
+                 '_id', '_internal_processors', '_last_heartbeat_time',
+                 '_latencies', '_logger', '_loop', '_receiver_routes',
+                 '_reelection_lag', '_reelection_task', '_role', '_sender',
+                 '_sync_task', '_url')
 
     @classmethod
     def from_url(cls,
@@ -478,8 +91,9 @@ class Node:
                  *,
                  heartbeat: Time = 5,
                  logger: Optional[logging.Logger] = None,
-                 processors: Optional[Mapping[str, Processor]] = None
-                 ) -> 'Node':
+                 loop: Optional[AbstractEventLoop] = None,
+                 processors: Optional[Mapping[str, Processor]] = None,
+                 sender: Sender[URL, CallKey]) -> 'Node':
         id_ = node_url_to_id(url)
         return cls(id_, RegularHistory([]),
                    Follower(term=0),
@@ -487,8 +101,10 @@ class Node:
                                         heartbeat=heartbeat,
                                         nodes_urls={id_: url},
                                         stable=False),
-                   logger=logger,
-                   processors=processors)
+                   logger=logging.getLogger() if logger is None else logger,
+                   loop=safe_get_event_loop() if loop is None else loop,
+                   processors=processors,
+                   sender=sender)
 
     def __init__(self,
                  _id: NodeId,
@@ -496,16 +112,20 @@ class Node:
                  _role: Role,
                  _cluster_state: ClusterState,
                  *,
-                 logger: Optional[logging.Logger] = None,
-                 processors: Optional[Mapping[str, Processor]] = None) -> None:
+                 logger: logging.Logger,
+                 loop: AbstractEventLoop,
+                 processors: Mapping[str, Processor],
+                 sender: Sender[URL, CallKey]) -> None:
         (
             self._cluster_state, self._commit_length, self._history, self._id,
-            self._role
-        ) = _cluster_state, 0, _history, _id, _role
+            self._role, self._sender
+        ) = _cluster_state, 0, _history, _id, _role, sender
         self._url = self._cluster_state.nodes_urls[self._id]
-        self._logger = logging.getLogger() if logger is None else logger
-        self._loop = safe_get_event_loop()
-        self._app = web.Application()
+        self._latencies = {receiver: deque([0],
+                                           maxlen=10)
+                           for receiver in self._cluster_state.nodes_ids}
+        self._logger = logger
+        self._loop = loop
         self._external_commands_loop = new_event_loop()
         self._external_commands_executor = to_commands_executor(
                 self._external_commands_loop
@@ -517,51 +137,18 @@ class Node:
             InternalAction.SEPARATE_CLUSTERS: Node._separate_clusters,
             InternalAction.STABILIZE_CLUSTER: Node._stabilize_cluster
         })
-        self._communication: Communication[NodeId, CallPath] = Communication(
-                heartbeat=self._cluster_state.heartbeat,
-                paths=list(CallPath),
-                registry=self._cluster_state.nodes_urls
-        )
         self._election_duration = 0
         self._election_task = self._loop.create_future()
         self._last_heartbeat_time = -self._cluster_state.heartbeat
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._sync_task = self._loop.create_future()
-        self._patch_routes = {
-            CallPath.LOG: (LogCall.from_json, self._process_log_call),
-            CallPath.SYNC: (SyncCall.from_json, self._process_sync_call),
-            CallPath.UPDATE: (UpdateCall.from_json, self._process_update_call),
-            CallPath.VOTE: (VoteCall.from_json, self._process_vote_call),
+        self._receiver_routes = {
+            CallKey.LOG: (LogCall.from_json, self._receive_log_call),
+            CallKey.SYNC: (SyncCall.from_json, self._receive_sync_call),
+            CallKey.UPDATE: (UpdateCall.from_json, self._receive_update_call),
+            CallKey.VOTE: (VoteCall.from_json, self._receive_vote_call),
         }
-
-        @web.middleware
-        async def error_middleware(
-                request: web.Request,
-                handler: Callable[[web.Request],
-                                  Awaitable[web.StreamResponse]],
-                log: Callable[[str], None] = self.logger.exception
-        ) -> web.StreamResponse:
-            try:
-                result = await handler(request)
-            except web.HTTPException:
-                raise
-            except Exception:
-                log('Something unexpected happened:')
-                raise
-            else:
-                return result
-
-        self._app.middlewares.append(error_middleware)
-        self._app.router.add_delete('/', self._handle_delete)
-        self._app.router.add_post('/', self._handle_post)
-        self._app.router.add_route(self._communication.HTTP_METHOD, '/',
-                                   self._handle_communication)
-        for path in self.processors.keys():
-            route = self._app.router.add_post(path, self._handle_record)
-            resource = route.resource
-            self.logger.debug(f'{self._id} has registered '
-                              f'resource {resource.canonical}')
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
@@ -571,6 +158,10 @@ class Node:
         return self._logger
 
     @property
+    def loop(self) -> AbstractEventLoop:
+        return self._loop
+
+    @property
     def processors(self) -> Mapping[str, Processor]:
         return self._external_processors
 
@@ -578,54 +169,35 @@ class Node:
     def url(self) -> URL:
         return self._url
 
-    def run(self) -> None:
-        url = self.url
-        web.run_app(self._app,
-                    host=url.host,
-                    port=url.port,
-                    loop=self._loop)
+    async def attach_nodes(self, urls: List[URL]) -> Optional[str]:
+        nodes_urls_to_add = {node_url_to_id(node_url): node_url
+                             for node_url in urls}
+        existing_nodes_ids = (nodes_urls_to_add.keys()
+                              & set(self._cluster_state.nodes_ids))
+        if existing_nodes_ids:
+            return ('already existing node(s) found: '
+                    f'{itemize(existing_nodes_ids)}')
+        self.logger.debug(f'{self._id} initializes '
+                          f'adding of {itemize(nodes_urls_to_add)}')
+        call = UpdateCall(
+                cluster_state=DisjointClusterState(
+                        generate_cluster_id(),
+                        heartbeat=self._cluster_state.heartbeat,
+                        nodes_urls=unite_mappings(
+                                self._cluster_state.nodes_urls,
+                                nodes_urls_to_add
+                        ),
+                        stable=False
+                ),
+                node_id=self._id
+        )
+        reply = await self._receive_update_call(call)
+        return update_status_to_error_message(reply.status)
 
-    async def _agitate_voter(self, node_id: NodeId) -> None:
-        reply = await self._call_vote(node_id)
-        await self._process_vote_reply(reply)
-
-    async def _handle_communication(self, request: web.Request
-                                    ) -> web_ws.WebSocketResponse:
-        websocket = web_ws.WebSocketResponse()
-        await websocket.prepare(request)
-        routes = self._patch_routes
-        async for message in websocket:
-            message: web_ws.WSMessage
-            raw_call = message.json()
-            call_path = CallPath(raw_call['path'])
-            call_from_json, processor = routes[call_path]
-            call = call_from_json(**raw_call['message'])
-            reply = await processor(call)
-            await websocket.send_json(reply.as_json())
-        return websocket
-
-    async def _handle_delete(self, request: web.Request) -> web.Response:
-        text = await request.text()
-        if text:
-            raw_nodes_urls = json.loads(text)
-            assert isinstance(raw_nodes_urls, list)
-            nodes_urls = [URL(raw_url) for raw_url in raw_nodes_urls]
-            nodes_urls_to_delete = {node_url_to_id(node_url): node_url
-                                    for node_url in nodes_urls}
-            nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
-                                     - set(self._cluster_state.nodes_ids))
-            if nonexistent_nodes_ids:
-                result = {'error': 'nonexistent node(s) found: '
-                                   f'{itemize(nonexistent_nodes_ids)}'}
-                return web.json_response(result)
-            self.logger.debug(f'{self._id} initializes '
-                              f'removal of {itemize(nodes_urls_to_delete)}')
-            rest_nodes_urls = subtract_mapping(self._cluster_state.nodes_urls,
-                                               nodes_urls_to_delete)
-        else:
-            self.logger.debug(f'{self._id} gets removed')
-            rest_nodes_urls = dict(self._cluster_state.nodes_urls)
-            rest_nodes_urls.pop(self._id, None)
+    async def detach(self) -> Optional[str]:
+        self.logger.debug(f'{self._id} gets removed')
+        rest_nodes_urls = dict(self._cluster_state.nodes_urls)
+        rest_nodes_urls.pop(self._id, None)
         call = UpdateCall(
                 cluster_state=DisjointClusterState(
                         generate_cluster_id(),
@@ -635,54 +207,65 @@ class Node:
                 ),
                 node_id=self._id
         )
-        reply = await self._process_update_call(call)
-        result = {'error': update_status_to_error_message(reply.status)}
-        return web.json_response(result)
+        reply = await self._receive_update_call(call)
+        return update_status_to_error_message(reply.status)
 
-    async def _handle_post(self, request: web.Request) -> web.Response:
-        text = await request.text()
-        if text:
-            raw_urls = json.loads(text)
-            assert isinstance(raw_urls, list)
-            urls = [URL(raw_url) for raw_url in raw_urls]
-            nodes_urls_to_add = {node_url_to_id(node_url): node_url
-                                 for node_url in urls}
-            existing_nodes_ids = (nodes_urls_to_add.keys()
-                                  & set(self._cluster_state.nodes_ids))
-            if existing_nodes_ids:
-                result = {'error': ('already existing node(s) found: '
-                                    f'{itemize(existing_nodes_ids)}')}
-                return web.json_response(result)
-            self.logger.debug(f'{self._id} initializes '
-                              f'adding of {itemize(nodes_urls_to_add)}')
-            call = UpdateCall(
-                    cluster_state=DisjointClusterState(
-                            generate_cluster_id(),
-                            heartbeat=self._cluster_state.heartbeat,
-                            nodes_urls=unite_mappings(
-                                    self._cluster_state.nodes_urls,
-                                    nodes_urls_to_add
-                            ),
-                            stable=False
-                    ),
-                    node_id=self._id
-            )
-            reply = await self._process_update_call(call)
-            result = {'error': update_status_to_error_message(reply.status)}
-            return web.json_response(result)
-        else:
-            self._solo()
-            return web.json_response({'error': None})
+    async def detach_nodes(self, urls: List[URL]) -> Optional[str]:
+        nodes_urls_to_delete = {node_url_to_id(node_url): node_url
+                                for node_url in urls}
+        nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
+                                 - set(self._cluster_state.nodes_ids))
+        if nonexistent_nodes_ids:
+            return ('nonexistent node(s) found: '
+                    f'{itemize(nonexistent_nodes_ids)}')
+        self.logger.debug(f'{self._id} initializes '
+                          f'removal of {itemize(nodes_urls_to_delete)}')
+        rest_nodes_urls = subtract_mapping(
+                self._cluster_state.nodes_urls,
+                nodes_urls_to_delete)
+        call = UpdateCall(
+                cluster_state=DisjointClusterState(
+                        generate_cluster_id(),
+                        heartbeat=self._cluster_state.heartbeat,
+                        nodes_urls=rest_nodes_urls,
+                        stable=False
+                ),
+                node_id=self._id
+        )
+        reply = await self._receive_update_call(call)
+        return update_status_to_error_message(reply.status)
 
-    async def _handle_record(self, request: web.Request) -> web.Response:
-        parameters = await request.json()
-        call = LogCall(command=Command(action=request.path,
+    async def enqueue(self, action: str, parameters: Any) -> Optional[str]:
+        assert action in self.processors
+        call = LogCall(command=Command(action=action,
                                        parameters=parameters,
                                        internal=False),
                        node_id=self._id)
-        reply = await self._process_log_call(call)
-        result = {'error': log_status_to_error_message(reply.status)}
-        return web.json_response(result)
+        reply = await self._receive_log_call(call)
+        return log_status_to_error_message(reply.status)
+
+    async def receive_json(self,
+                           key: CallKey,
+                           message: Dict[str, Any]) -> Dict[str, Any]:
+        call_from_json, processor = self._receiver_routes[key]
+        call = call_from_json(**message)
+        reply = await processor(call)
+        return reply.as_json()
+
+    async def solo(self) -> Optional[str]:
+        self.logger.debug(f'{self._id} solos')
+        self._update_cluster_state(DisjointClusterState(
+                generate_cluster_id(),
+                heartbeat=self._cluster_state.heartbeat,
+                nodes_urls={self._id: self.url},
+                stable=True
+        ))
+        self._lead()
+        return None
+
+    async def _agitate_voter(self, node_id: NodeId) -> None:
+        reply = await self._call_vote(node_id)
+        await self._process_vote_reply(reply)
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
         prefix_length = self._history.sent_lengths[node_id]
@@ -700,14 +283,12 @@ class Node:
                         suffix=list(self._history.log[prefix_length:]),
                         term=self._role.term)
         try:
-            raw_reply = await self._send_call(node_id, CallPath.SYNC, call)
-        except (ClientError, OSError, ReceiverNotFound):
+            return await self._send_sync_call(node_id, call)
+        except ReceiverUnavailable:
             return SyncReply(accepted_length=0,
                              node_id=node_id,
                              status=SyncStatus.UNAVAILABLE,
                              term=self._role.term)
-        else:
-            return SyncReply.from_json(**raw_reply)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
         call = VoteCall(node_id=self._id,
@@ -715,15 +296,13 @@ class Node:
                         log_length=len(self._history.log),
                         log_term=to_log_term(self._history))
         try:
-            raw_reply = await self._send_call(node_id, CallPath.VOTE, call)
-        except (ClientError, OSError, ReceiverNotFound):
+            return await self._send_vote_call(node_id, call)
+        except ReceiverUnavailable:
             return VoteReply(node_id=node_id,
                              status=VoteStatus.UNAVAILABLE,
                              term=self._role.term)
-        else:
-            return VoteReply.from_json(**raw_reply)
 
-    async def _process_log_call(self, call: LogCall) -> LogReply:
+    async def _receive_log_call(self, call: LogCall) -> LogReply:
         self.logger.debug(f'{self._id} processes {call}')
         if self._role.leader_node_id is None:
             assert self._role.kind is not RoleKind.LEADER
@@ -731,16 +310,14 @@ class Node:
         elif self._role.kind is not RoleKind.LEADER:
             assert self._role.kind is RoleKind.FOLLOWER
             try:
-                raw_reply = await wait_for(
-                        self._send_call(self._role.leader_node_id,
-                                        CallPath.LOG, call),
+                return await wait_for(
+                        await self._send_log_call(self._role.leader_node_id,
+                                                  call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time)
                 )
-            except (ClientError, OSError, ReceiverNotFound, TimeoutError):
+            except (ReceiverUnavailable, TimeoutError):
                 return LogReply(status=LogStatus.UNAVAILABLE)
-            else:
-                return LogReply.from_json(**raw_reply)
         elif call.node_id not in self._cluster_state.nodes_ids:
             return LogReply(status=LogStatus.REJECTED)
         else:
@@ -751,7 +328,7 @@ class Node:
             await self._sync_followers_once()
             return LogReply(status=LogStatus.SUCCEED)
 
-    async def _process_sync_call(self, call: SyncCall) -> SyncReply:
+    async def _receive_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._id} processes {call}')
         clusters_agree = (self._cluster_state.id.agrees_with(call.cluster_id)
                           if self._cluster_state.id
@@ -794,7 +371,7 @@ class Node:
                              status=SyncStatus.FAILURE,
                              term=self._role.term)
 
-    async def _process_sync_reply(self, reply: SyncReply) -> None:
+    async def _receive_sync_reply(self, reply: SyncReply) -> None:
         self.logger.debug(f'{self._id} processes {reply}')
         if self._role.kind is not RoleKind.LEADER:
             pass
@@ -822,7 +399,7 @@ class Node:
             self._withdraw(reply.term)
             self._cancel_election_timer()
 
-    async def _process_update_call(self, call: UpdateCall) -> UpdateReply:
+    async def _receive_update_call(self, call: UpdateCall) -> UpdateReply:
         self.logger.debug(f'{self._id} processes {call}')
         if (len(self._cluster_state.nodes_ids) == 1
                 and not call.cluster_state.nodes_ids):
@@ -835,16 +412,14 @@ class Node:
             return UpdateReply(status=UpdateStatus.UNGOVERNABLE)
         elif self._role.kind is not RoleKind.LEADER:
             try:
-                raw_reply = await wait_for(
-                        self._send_call(self._role.leader_node_id,
-                                        CallPath.UPDATE, call),
+                return await wait_for(
+                        await self._send_update_call(self._role.leader_node_id,
+                                                     call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time)
                 )
-            except (ClientError, OSError, ReceiverNotFound, TimeoutError):
+            except (ReceiverUnavailable, TimeoutError):
                 return UpdateReply(status=UpdateStatus.UNAVAILABLE)
-            else:
-                return UpdateReply.from_json(**raw_reply)
         elif call.node_id not in self._cluster_state.nodes_ids:
             return UpdateReply(status=UpdateStatus.REJECTED)
         elif not self._cluster_state.stable:
@@ -862,7 +437,7 @@ class Node:
         self._restart_sync_timer()
         return UpdateReply(status=UpdateStatus.SUCCEED)
 
-    async def _process_vote_call(self, call: VoteCall) -> VoteReply:
+    async def _receive_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self._id} processes {call}')
         if call.node_id not in self._cluster_state.nodes_ids:
             self.logger.debug(f'{self._id} skips voting '
@@ -948,16 +523,43 @@ class Node:
                               f'{len(self._role.supporters_nodes_ids)}')
             await sleep(self._election_duration - duration)
 
-    async def _send_call(self,
-                         to: NodeId,
-                         path: CallPath,
-                         call: Call) -> Dict[str, Any]:
-        result = await self._communication.send(to, path, call.as_json())
+    async def _send_json(self,
+                         receiver: NodeId,
+                         key: CallKey,
+                         message: Dict[str, Any]) -> Dict[str, Any]:
+        message_start = self._to_time()
+        receiver_url = self._cluster_state.nodes_urls[receiver]
+        result = await self._sender.send_json(receiver_url, key, message)
+        reply_end = self._to_time()
+        latency = reply_end - message_start
+        self._latencies[receiver].append(latency)
         return result
+
+    async def _send_log_call(self, node_id: NodeId, call: LogCall) -> LogReply:
+        raw_reply = self._send_json(node_id, CallKey.LOG, call.as_json())
+        return LogReply.from_json(**raw_reply)
+
+    async def _send_sync_call(self,
+                              node_id: NodeId,
+                              call: SyncCall) -> SyncReply:
+        raw_reply = await self._send_json(node_id, CallKey.SYNC,
+                                          call.as_json())
+        return SyncReply.from_json(**raw_reply)
+
+    async def _send_vote_call(self, node_id: NodeId, call: VoteCall
+                              ) -> VoteReply:
+        raw_reply = await self._send_json(node_id, CallKey.VOTE,
+                                          call.as_json())
+        return VoteReply.from_json(**raw_reply)
+
+    async def _send_update_call(self, node_id: NodeId, call: UpdateCall
+                                ) -> UpdateReply:
+        raw_reply = self._send_json(node_id, CallKey.UPDATE, call.as_json())
+        return UpdateReply.from_json(**raw_reply)
 
     async def _sync_follower(self, node_id: NodeId) -> None:
         reply = await self._call_sync(node_id)
-        await self._process_sync_reply(reply)
+        await self._receive_sync_reply(reply)
 
     async def _sync_followers(self) -> None:
         self.logger.info(f'{self._id} syncs followers')
@@ -968,7 +570,7 @@ class Node:
             self.logger.debug(
                     f'{self._id} followers\' sync took {duration}s')
             await sleep(self._cluster_state.heartbeat - duration
-                        - self._communication.to_expected_broadcast_time())
+                        - self._to_expected_broadcast_time())
 
     async def _sync_followers_once(self) -> None:
         await gather(*[self._sync_follower(node_id)
@@ -1122,22 +724,13 @@ class Node:
             command = Command(action=InternalAction.STABILIZE_CLUSTER,
                               parameters=cluster_state.new.as_json(),
                               internal=True)
-            append_record(self._history,
-                          Record(cluster_id=self._cluster_state.id,
-                                 command=command,
-                                 term=self._role.term))
+            record = Record(cluster_id=self._cluster_state.id,
+                            command=command,
+                            term=self._role.term)
+            self.logger.warning(f'{self._id} appends {record}')
+            append_record(self._history, record)
             self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
-
-    def _solo(self) -> None:
-        self.logger.debug(f'{self._id} solos')
-        self._update_cluster_state(DisjointClusterState(
-                generate_cluster_id(),
-                heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._id: self.url},
-                stable=True
-        ))
-        self._lead()
 
     def _stabilize_cluster(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._id} stabilizes cluster')
@@ -1163,8 +756,11 @@ class Node:
     def _start_sync_timer(self) -> None:
         self._sync_task = self._loop.create_task(self._sync_followers())
 
+    def _to_expected_broadcast_time(self) -> float:
+        return sum(max(latencies) for latencies in self._latencies.values())
+
     def _to_new_duration(self) -> Time:
-        broadcast_time = self._communication.to_expected_broadcast_time()
+        broadcast_time = self._to_expected_broadcast_time()
         heartbeat = self._cluster_state.heartbeat
         assert (
                 broadcast_time < heartbeat
@@ -1200,11 +796,20 @@ class Node:
             self._commit([self._history.log[self._commit_length]])
 
     def _update_cluster_state(self, cluster_state: ClusterState) -> None:
-        self._cluster_state = cluster_state
-        update_communication_registry(self._communication,
-                                      cluster_state.nodes_urls)
+        self._sender.receivers = cluster_state.nodes_urls.keys()
+        self._update_latencies(cluster_state.nodes_ids)
         update_nodes_ids(self._role, cluster_state.nodes_ids)
         self._history = self._history.with_nodes_ids(cluster_state.nodes_ids)
+        self._cluster_state = cluster_state
+
+    def _update_latencies(self, new_nodes_ids: Collection[NodeId]) -> None:
+        new_nodes_ids, old_nodes_ids = (set(new_nodes_ids),
+                                        set(self._cluster_state.nodes_ids))
+        for removed_node_id in old_nodes_ids - new_nodes_ids:
+            del self._latencies[removed_node_id]
+        for added_node_id in new_nodes_ids - old_nodes_ids:
+            self._latencies[added_node_id] = deque([0],
+                                                   maxlen=10)
 
     def _withdraw(self, term: Term) -> None:
         self._history = self._history.to_regular()
