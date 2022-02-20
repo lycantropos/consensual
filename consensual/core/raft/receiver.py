@@ -10,5 +10,6 @@ class Receiver(ABC):
     def from_node(cls, node: Node) -> 'Receiver':
         """Constructs receiver from given node."""
 
+    @abstractmethod
     def start(self) -> None:
-        """Starts receiving requests."""
+        """Starts receiving messages."""
