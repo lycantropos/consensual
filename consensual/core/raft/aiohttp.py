@@ -36,6 +36,8 @@ class Receiver(_Receiver):
             raise TypeError('node supposed to have compatible sender type, '
                             f'but found {type(node.sender)}')
         app = _web.Application()
+        self = cls(app=app,
+                   node=node)
 
         @_web.middleware
         async def error_middleware(
@@ -55,14 +57,14 @@ class Receiver(_Receiver):
                 return result
 
         app.middlewares.append(error_middleware)
-        self = cls(app=app,
-                   node=node)
         app.router.add_delete('/', self._handle_delete)
         app.router.add_post('/', self._handle_post)
         app.router.add_route(Sender.HTTP_METHOD, '/',
                              self._handle_communication)
-        for path in node.processors.keys():
-            app.router.add_post(path, self._handle_record)
+        for action in node.processors.keys():
+            route = app.router.add_post(f'/{action}', self._handle_record)
+            resource = route.resource
+            node.logger.debug(f'registered resource {resource.canonical}')
         return self
 
     def start(self) -> None:
