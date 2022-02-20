@@ -809,7 +809,7 @@ class Node:
             self._commit([self._history.log[self._commit_length]])
 
     def _update_cluster_state(self, cluster_state: ClusterState) -> None:
-        self._sender.urls = cluster_state.nodes_urls.keys()
+        self._sender.urls = cluster_state.nodes_urls.values()
         self._update_latencies(cluster_state.nodes_ids)
         update_nodes_ids(self._role, cluster_state.nodes_ids)
         self._history = self._history.with_nodes_ids(cluster_state.nodes_ids)
