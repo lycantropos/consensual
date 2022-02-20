@@ -101,7 +101,7 @@ class Node:
                                         nodes_urls={id_: url},
                                         stable=False),
                    logger=logging.getLogger() if logger is None else logger,
-                   loop=safe_get_event_loop() if loop is None else loop,
+                   loop=get_event_loop() if loop is None else loop,
                    processors=processors,
                    sender=sender)
 
@@ -862,15 +862,6 @@ def log_status_to_error_message(status: LogStatus) -> Optional[str]:
 
 def node_url_to_id(url: URL) -> NodeId:
     return f'{host_to_ip_address(url.host)}:{url.port}'
-
-
-def safe_get_event_loop() -> AbstractEventLoop:
-    try:
-        result = get_event_loop()
-    except RuntimeError:
-        result = new_event_loop()
-        set_event_loop(result)
-    return result
 
 
 def update_status_to_error_message(status: UpdateStatus) -> Optional[str]:

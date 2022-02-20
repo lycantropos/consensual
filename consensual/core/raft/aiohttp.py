@@ -1,6 +1,9 @@
 import json as _json
-from asyncio import (Queue as _Queue,
-                     get_event_loop as _get_event_loop)
+from asyncio import (AbstractEventLoop as _AbstractEventLoop,
+                     Queue as _Queue,
+                     get_event_loop as _get_event_loop,
+                     new_event_loop as _new_event_loop,
+                     set_event_loop as _set_event_loop)
 from typing import (Any as _Any,
                     Awaitable as _Awaitable,
                     Callable as _Callable,
@@ -127,7 +130,7 @@ class Sender(_Sender):
                  heartbeat: _Time,
                  urls: _Collection[_URL]) -> None:
         self._heartbeat, self._urls = heartbeat, urls
-        self._loop = _get_event_loop()
+        self._loop = _safe_get_event_loop()
         self._messages: _Dict[_URL, _Queue] = {receiver: _Queue()
                                                for receiver in self._urls}
         self._results = {url: {kind: _Queue() for kind in _MessageKind}
@@ -206,3 +209,12 @@ class Sender(_Sender):
     def _disconnect(self, url: _URL) -> None:
         self._channels.pop(url).cancel()
         del self._messages[url], self._results[url]
+
+
+def _safe_get_event_loop() -> _AbstractEventLoop:
+    try:
+        result = _get_event_loop()
+    except RuntimeError:
+        result = _new_event_loop()
+        _set_event_loop(result)
+    return result
