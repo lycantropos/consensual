@@ -113,7 +113,7 @@ class Receiver(_Receiver):
 
     async def _handle_record(self, request: _web.Request) -> _web.Response:
         parameters = await request.json()
-        error_message = await self.node.enqueue(request.path, parameters)
+        error_message = await self.node.enqueue(request.path[1:], parameters)
         return _web.json_response({'error': error_message})
 
 
