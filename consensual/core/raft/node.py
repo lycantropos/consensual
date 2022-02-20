@@ -328,8 +328,7 @@ class Node:
             assert self._role.kind is RoleKind.FOLLOWER
             try:
                 return await wait_for(
-                        await self._send_log_call(self._role.leader_node_id,
-                                                  call),
+                        self._send_log_call(self._role.leader_node_id, call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time)
                 )
@@ -429,8 +428,8 @@ class Node:
         elif self._role.kind is not RoleKind.LEADER:
             try:
                 return await wait_for(
-                        await self._send_update_call(self._role.leader_node_id,
-                                                     call),
+                        self._send_update_call(self._role.leader_node_id,
+                                               call),
                         self._reelection_lag
                         - (self._to_time() - self._last_heartbeat_time)
                 )
@@ -554,7 +553,8 @@ class Node:
         return result
 
     async def _send_log_call(self, node_id: NodeId, call: LogCall) -> LogReply:
-        raw_reply = self._send_json(node_id, MessageKind.LOG, call.as_json())
+        raw_reply = await self._send_json(node_id, MessageKind.LOG,
+                                          call.as_json())
         return LogReply.from_json(**raw_reply)
 
     async def _send_sync_call(self,
@@ -572,8 +572,8 @@ class Node:
 
     async def _send_update_call(self, node_id: NodeId, call: UpdateCall
                                 ) -> UpdateReply:
-        raw_reply = self._send_json(node_id, MessageKind.UPDATE,
-                                    call.as_json())
+        raw_reply = await self._send_json(node_id, MessageKind.UPDATE,
+                                          call.as_json())
         return UpdateReply.from_json(**raw_reply)
 
     async def _sync_follower(self, node_id: NodeId) -> None:
