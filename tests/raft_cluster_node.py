@@ -40,15 +40,17 @@ class RaftClusterNode:
                  random_seed: int,
                  *,
                  heartbeat: float) -> None:
-        self.index, self.heartbeat, self.processors, self.random_seed, self.url = (
-            index, heartbeat, processors, random_seed, url,
-        )
+        (
+            self.index, self.heartbeat, self.processors, self.random_seed,
+            self.url
+        ) = index, heartbeat, processors, random_seed, url
         self._url_string = str(url)
         self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
                 target=run_node,
                 args=(self.url, self.processors, self.heartbeat,
-                      self.random_seed, self._event))
+                      self.random_seed, self._event)
+        )
         self._session = Session()
         self._old_cluster_state: Optional[RaftClusterState] = None
         self._old_node_state: Optional[RaftNodeState] = None
