@@ -150,14 +150,15 @@ class RaftClusterNode:
 
     def restart(self) -> bool:
         assert self._process is None
-        return self.start()
-
-    def start(self) -> bool:
         self._event = multiprocessing.Event()
         self._process = multiprocessing.Process(
                 target=run_node,
                 args=(self.url, self.processors, self.heartbeat,
-                      self.random_seed, self._event))
+                      self.random_seed, self._event)
+        )
+        return self.start()
+
+    def start(self) -> bool:
         self._process.start()
         self._event.wait()
         del self._event
