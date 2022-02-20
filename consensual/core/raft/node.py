@@ -82,7 +82,8 @@ class Node:
                  '_external_commands_loop', '_external_processors', '_history',
                  '_id', '_internal_processors', '_last_heartbeat_time',
                  '_latencies', '_logger', '_loop', '_reelection_lag',
-                 '_reelection_task', '_role', '_sender', '_sync_task', '_url')
+                 '_reelection_task', '_role', '_sender', '_sync_task', '_url',
+                 '__weakref__')
 
     @classmethod
     def from_url(cls,
