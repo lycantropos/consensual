@@ -1,10 +1,10 @@
-from .core.raft import (CallKey,
+from .core.raft import (MessageKind,
                         Node,
                         Processor,
                         Receiver,
                         aiohttp)
 
-CallKey = CallKey
+MessageKind = MessageKind
 Node = Node
 Processor = Processor
 Receiver = Receiver

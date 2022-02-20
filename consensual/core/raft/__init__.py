@@ -1,6 +1,6 @@
 from . import aiohttp
 from .hints import Processor
-from .messages import CallKey
+from .messages import MessageKind
 from .node import Node
 from .receiver import Receiver
 from .sender import (ReceiverUnavailable,

@@ -20,13 +20,6 @@ class Call(Protocol):
         return {}
 
 
-class CallKey(enum.IntEnum):
-    LOG = 0
-    SYNC = 1
-    UPDATE = 2
-    VOTE = 3
-
-
 class LogCall:
     __slots__ = '_command', '_node_id'
 
@@ -85,6 +78,13 @@ class LogReply:
 
     def as_json(self) -> Dict[str, Any]:
         return {'status': int(self.status)}
+
+
+class MessageKind(enum.IntEnum):
+    LOG = 0
+    SYNC = 1
+    UPDATE = 2
+    VOTE = 3
 
 
 class SyncCall:

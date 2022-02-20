@@ -5,8 +5,7 @@ from typing import (Any as _Any,
                     Awaitable as _Awaitable,
                     Callable as _Callable,
                     Collection as _Collection,
-                    Dict as _Dict,
-                    TypeVar as _TypeVar)
+                    Dict as _Dict)
 
 from aiohttp import (ClientError as _ClientError,
                      ClientSession as _ClientSession,
@@ -17,7 +16,7 @@ from reprit.base import generate_repr as _generate_repr
 from yarl import URL as _URL
 
 from .hints import Time as _Time
-from .messages import CallKey as _CallKey
+from .messages import MessageKind as _MessageKind
 from .node import Node as _Node
 from .receiver import Receiver as _Receiver
 from .result import (Error as _Error,
@@ -77,8 +76,10 @@ class Receiver(_Receiver):
         async for message in websocket:
             message: _web_ws.WSMessage
             contents = message.json()
-            reply = await self.node.receive_json(_CallKey(contents['key']),
-                                                 contents['message'])
+            reply = await self.node.receive(
+                    kind=_MessageKind(contents['kind']),
+                    message=contents['message']
+            )
             await websocket.send_json(reply)
         return websocket
 
@@ -111,10 +112,7 @@ class Receiver(_Receiver):
         return _web.json_response({'error': error_message})
 
 
-_Key = _TypeVar('_Key')
-
-
-class Sender(_Sender[_URL, _Key]):
+class Sender(_Sender):
     HTTP_METHOD = _hdrs.METH_PATCH
     assert (HTTP_METHOD is not _hdrs.METH_POST
             and HTTP_METHOD is not _hdrs.METH_DELETE)
@@ -122,23 +120,16 @@ class Sender(_Sender[_URL, _Key]):
     def __init__(self,
                  *,
                  heartbeat: _Time,
-                 keys: _Collection[_Key],
-                 receivers: _Collection[_URL]) -> None:
-        self._heartbeat, self._keys, self._receivers = (
-            heartbeat, keys, receivers
-        )
+                 urls: _Collection[_URL]) -> None:
+        self._heartbeat, self._urls = heartbeat, urls
         self._loop = _get_event_loop()
         self._messages: _Dict[_URL, _Queue] = {receiver: _Queue()
-                                               for receiver in self._receivers}
-        self._results: _Dict[_URL, _Dict[_Key, _Queue]] = {
-            receiver: {key: _Queue() for key in self.keys}
-            for receiver in self._receivers
-        }
+                                               for receiver in self._urls}
+        self._results = {url: {kind: _Queue() for kind in _MessageKind}
+                         for url in self._urls}
         self._session = _ClientSession(loop=self._loop)
-        self._channels = {
-            receiver: self._loop.create_task(self._channel(receiver))
-            for receiver in self._receivers
-        }
+        self._channels = {url: self._loop.create_task(self._channel(url))
+                          for url in self._urls}
 
     __repr__ = _generate_repr(__init__)
 
@@ -147,72 +138,66 @@ class Sender(_Sender[_URL, _Key]):
         return self._heartbeat
 
     @property
-    def keys(self) -> _Collection[_Key]:
-        return self._keys
+    def urls(self) -> _Collection[_URL]:
+        return self._urls
 
-    @property
-    def receivers(self) -> _Collection[_URL]:
-        return self._receivers
+    @urls.setter
+    def urls(self, value: _Collection[_URL]) -> None:
+        new_urls, old_urls = set(value), set(self._urls)
+        for removed_url in old_urls - new_urls:
+            self._disconnect(removed_url)
+        self._urls = value
+        for added_url in new_urls - old_urls:
+            self._connect(added_url)
 
-    @receivers.setter
-    def receivers(self, value: _Collection[_URL]) -> None:
-        new_receivers, old_receivers = set(value), set(self._receivers)
-        for removed_receiver in old_receivers - new_receivers:
-            self._disconnect(removed_receiver)
-        self._receivers = value
-        for added_receiver in new_receivers - old_receivers:
-            self._connect(added_receiver)
-
-    async def send_json(self, receiver: _URL, key: _Key, message: _Any
-                        ) -> _Any:
-        assert key in self.keys, key
+    async def send(self, *, kind: _MessageKind, message: _Any, url: _URL
+                   ) -> _Any:
+        assert kind in _MessageKind, kind
         try:
-            messages = self._messages[receiver]
+            messages = self._messages[url]
         except KeyError:
-            raise _ReceiverUnavailable(receiver)
-        messages.put_nowait((key, message))
-        result: _Result = await self._results[receiver][key].get()
+            raise _ReceiverUnavailable(url)
+        messages.put_nowait((kind, message))
+        result: _Result = await self._results[url][kind].get()
         try:
             return result.value
         except (_ClientError, OSError):
-            raise _ReceiverUnavailable(receiver)
+            raise _ReceiverUnavailable(url)
 
-    async def _channel(self, receiver: _URL) -> None:
-        messages, results = self._messages[receiver], self._results[receiver]
-        key, message = await messages.get()
+    async def _channel(self, url: _URL) -> None:
+        messages, results = self._messages[url], self._results[url]
+        kind, message = await messages.get()
         while True:
             try:
                 async with self._session.ws_connect(
-                        receiver,
+                        url,
                         heartbeat=self.heartbeat,
                         method=self.HTTP_METHOD,
                         timeout=self.heartbeat
                 ) as connection:
                     try:
-                        await connection.send_json({'key': key,
+                        await connection.send_json({'kind': kind,
                                                     'message': message})
                     except (_ClientError, OSError):
                         continue
                     async for reply in connection:
                         reply: _web_ws.WSMessage
-                        results[key].put_nowait(_Ok(reply.json()))
-                        key, message = await messages.get()
+                        results[kind].put_nowait(_Ok(reply.json()))
+                        kind, message = await messages.get()
                         try:
-                            await connection.send_json({'key': key,
+                            await connection.send_json({'kind': kind,
                                                         'message': message})
                         except (_ClientError, OSError):
                             continue
             except (_ClientError, OSError) as exception:
-                results[key].put_nowait(_Error(exception))
-                key, message = await messages.get()
+                results[kind].put_nowait(_Error(exception))
+                kind, message = await messages.get()
 
-    def _connect(self, receiver: _URL) -> None:
-        self._messages[receiver] = _Queue()
-        self._results[receiver] = {key: _Queue() for key in self.keys}
-        self._channels[receiver] = self._loop.create_task(
-                self._channel(receiver)
-        )
+    def _connect(self, url: _URL) -> None:
+        self._messages[url] = _Queue()
+        self._results[url] = {kind: _Queue() for kind in _MessageKind}
+        self._channels[url] = self._loop.create_task(self._channel(url))
 
-    def _disconnect(self, receiver: _URL) -> None:
-        self._channels.pop(receiver).cancel()
-        del self._messages[receiver], self._results[receiver]
+    def _disconnect(self, url: _URL) -> None:
+        self._channels.pop(url).cancel()
+        del self._messages[url], self._results[url]

@@ -41,10 +41,10 @@ from .history import (History,
                       append_records,
                       to_log_term,
                       to_nodes_ids_that_accepted_more_records)
-from .messages import (CallKey,
-                       LogCall,
+from .messages import (LogCall,
                        LogReply,
                        LogStatus,
+                       MessageKind,
                        SyncCall,
                        SyncReply,
                        SyncStatus,
@@ -81,9 +81,8 @@ class Node:
                  '_election_task', '_external_commands_executor',
                  '_external_commands_loop', '_external_processors', '_history',
                  '_id', '_internal_processors', '_last_heartbeat_time',
-                 '_latencies', '_logger', '_loop', '_receiver_routes',
-                 '_reelection_lag', '_reelection_task', '_role', '_sender',
-                 '_sync_task', '_url')
+                 '_latencies', '_logger', '_loop', '_reelection_lag',
+                 '_reelection_task', '_role', '_sender', '_sync_task', '_url')
 
     @classmethod
     def from_url(cls,
@@ -93,7 +92,7 @@ class Node:
                  logger: Optional[logging.Logger] = None,
                  loop: Optional[AbstractEventLoop] = None,
                  processors: Optional[Mapping[str, Processor]] = None,
-                 sender: Sender[URL, CallKey]) -> 'Node':
+                 sender: Sender) -> 'Node':
         id_ = node_url_to_id(url)
         return cls(id_, RegularHistory([]),
                    Follower(term=0),
@@ -115,7 +114,7 @@ class Node:
                  logger: logging.Logger,
                  loop: AbstractEventLoop,
                  processors: Mapping[str, Processor],
-                 sender: Sender[URL, CallKey]) -> None:
+                 sender: Sender) -> None:
         (
             self._cluster_state, self._commit_length, self._history, self._id,
             self._role, self._sender
@@ -143,12 +142,6 @@ class Node:
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._sync_task = self._loop.create_future()
-        self._receiver_routes = {
-            CallKey.LOG: (LogCall.from_json, self._receive_log_call),
-            CallKey.SYNC: (SyncCall.from_json, self._receive_sync_call),
-            CallKey.UPDATE: (UpdateCall.from_json, self._receive_update_call),
-            CallKey.VOTE: (VoteCall.from_json, self._receive_vote_call),
-        }
 
     __repr__ = generate_repr(__init__,
                              field_seeker=seekers.complex_)
@@ -168,6 +161,10 @@ class Node:
     @property
     def url(self) -> URL:
         return self._url
+
+    @property
+    def sender(self) -> Sender:
+        return self._sender
 
     async def attach_nodes(self, urls: List[URL]) -> Optional[str]:
         nodes_urls_to_add = {node_url_to_id(node_url): node_url
@@ -244,10 +241,23 @@ class Node:
         reply = await self._receive_log_call(call)
         return log_status_to_error_message(reply.status)
 
-    async def receive_json(self,
-                           key: CallKey,
-                           message: Dict[str, Any]) -> Dict[str, Any]:
-        call_from_json, processor = self._receiver_routes[key]
+    async def receive(self,
+                      *,
+                      kind: MessageKind,
+                      message: Dict[str, Any]) -> Dict[str, Any]:
+        if kind is MessageKind.LOG:
+            call_from_json, processor = (LogCall.from_json,
+                                         self._receive_log_call)
+        elif kind is MessageKind.SYNC:
+            call_from_json, processor = (SyncCall.from_json,
+                                         self._receive_sync_call)
+        elif kind is MessageKind.UPDATE:
+            call_from_json, processor = (UpdateCall.from_json,
+                                         self._receive_update_call)
+        else:
+            assert kind is MessageKind.VOTE
+            call_from_json, processor = (VoteCall.from_json,
+                                         self._receive_vote_call)
         call = call_from_json(**message)
         reply = await processor(call)
         return reply.as_json()
@@ -525,36 +535,39 @@ class Node:
 
     async def _send_json(self,
                          receiver: NodeId,
-                         key: CallKey,
+                         kind: MessageKind,
                          message: Dict[str, Any]) -> Dict[str, Any]:
-        message_start = self._to_time()
         receiver_url = self._cluster_state.nodes_urls[receiver]
-        result = await self._sender.send_json(receiver_url, key, message)
+        message_start = self._to_time()
+        result = await self._sender.send(kind=kind,
+                                         message=message,
+                                         url=receiver_url)
         reply_end = self._to_time()
         latency = reply_end - message_start
         self._latencies[receiver].append(latency)
         return result
 
     async def _send_log_call(self, node_id: NodeId, call: LogCall) -> LogReply:
-        raw_reply = self._send_json(node_id, CallKey.LOG, call.as_json())
+        raw_reply = self._send_json(node_id, MessageKind.LOG, call.as_json())
         return LogReply.from_json(**raw_reply)
 
     async def _send_sync_call(self,
                               node_id: NodeId,
                               call: SyncCall) -> SyncReply:
-        raw_reply = await self._send_json(node_id, CallKey.SYNC,
+        raw_reply = await self._send_json(node_id, MessageKind.SYNC,
                                           call.as_json())
         return SyncReply.from_json(**raw_reply)
 
     async def _send_vote_call(self, node_id: NodeId, call: VoteCall
                               ) -> VoteReply:
-        raw_reply = await self._send_json(node_id, CallKey.VOTE,
+        raw_reply = await self._send_json(node_id, MessageKind.VOTE,
                                           call.as_json())
         return VoteReply.from_json(**raw_reply)
 
     async def _send_update_call(self, node_id: NodeId, call: UpdateCall
                                 ) -> UpdateReply:
-        raw_reply = self._send_json(node_id, CallKey.UPDATE, call.as_json())
+        raw_reply = self._send_json(node_id, MessageKind.UPDATE,
+                                    call.as_json())
         return UpdateReply.from_json(**raw_reply)
 
     async def _sync_follower(self, node_id: NodeId) -> None:
@@ -796,7 +809,7 @@ class Node:
             self._commit([self._history.log[self._commit_length]])
 
     def _update_cluster_state(self, cluster_state: ClusterState) -> None:
-        self._sender.receivers = cluster_state.nodes_urls.keys()
+        self._sender.urls = cluster_state.nodes_urls.keys()
         self._update_latencies(cluster_state.nodes_ids)
         update_nodes_ids(self._role, cluster_state.nodes_ids)
         self._history = self._history.with_nodes_ids(cluster_state.nodes_ids)

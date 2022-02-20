@@ -1,27 +1,23 @@
 from abc import (ABC,
                  abstractmethod)
 from typing import (Any,
-                    Collection,
-                    Generic,
-                    TypeVar)
+                    Collection)
 
-_Receiver = TypeVar('_Receiver')
-_Key = TypeVar('_Key')
+from yarl import URL
+
+from .messages import MessageKind
 
 
 class ReceiverUnavailable(Exception):
     pass
 
 
-class Sender(ABC, Generic[_Receiver, _Key]):
-    receivers: Collection[_Receiver]
+class Sender(ABC):
+    urls: Collection[URL]
 
     @abstractmethod
-    async def send_json(self,
-                        receiver: _Receiver,
-                        key: _Key,
-                        message: Any) -> Any:
+    async def send(self, *, kind: MessageKind, message: Any, url: URL) -> Any:
         """
-        Sends JSON-serializable message to a receiver by given key
+        Sends given message of given kind to given URL
         or raises ``ReceiverUnavailable`` exception in case of failure.
         """
