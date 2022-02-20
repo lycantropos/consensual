@@ -1,3 +1,4 @@
+from . import aiohttp
 from .hints import Processor
 from .messages import CallKey
 from .node import Node
