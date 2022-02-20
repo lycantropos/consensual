@@ -51,22 +51,21 @@ paths_infixes = strategies.text(paths_infixes_letters,
                                 min_size=1)
 
 
-def to_longer_base_paths(strategy: SearchStrategy[str]) -> SearchStrategy[str]:
+def to_longer_actions(strategy: SearchStrategy[str]) -> SearchStrategy[str]:
     return strategies.builds(add, strategy, paths_infixes)
 
 
-plain_base_paths = strategies.text(plain_paths_letters,
-                                   min_size=1)
-base_paths = (plain_base_paths
-              | strategies.builds(add,
-                                  strategies.recursive(plain_base_paths,
-                                                       to_longer_base_paths),
-                                  plain_base_paths))
-paths = base_paths.map('/{}'.format)
+plain_actions = strategies.text(plain_paths_letters,
+                                min_size=1)
+actions = (plain_actions
+           | strategies.builds(add,
+                               strategies.recursive(plain_actions,
+                                                    to_longer_actions),
+                               plain_actions))
 processors_parameters = {waiting_processor: strategies.floats(-10, 10),
                          asyncio_waiting_processor: strategies.floats(-10, 10)}
 processors = strategies.sampled_from(list(processors_parameters))
-processors_dicts = strategies.dictionaries(keys=paths,
+processors_dicts = strategies.dictionaries(keys=actions,
                                            values=processors)
 running_nodes_parameters = strategies.tuples(hosts, ports_ranges,
                                              processors_dicts, random_seeds)
