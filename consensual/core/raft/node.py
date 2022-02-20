@@ -233,7 +233,7 @@ class Node:
         return update_status_to_error_message(reply.status)
 
     async def enqueue(self, action: str, parameters: Any) -> Optional[str]:
-        assert action in self.processors
+        assert action in self.processors, action
         call = LogCall(command=Command(action=action,
                                        parameters=parameters,
                                        internal=False),
