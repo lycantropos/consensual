@@ -1,6 +1,7 @@
 import logging.config
 import random
 import sys
+import threading
 import uuid
 from asyncio import (AbstractEventLoop,
                      Future,
@@ -76,6 +77,9 @@ class InternalAction:
     assert STABILIZE_CLUSTER and not STABILIZE_CLUSTER.startswith('/')
 
 
+event_loops: Dict[int, AbstractEventLoop] = {}
+
+
 class Node:
     __slots__ = ('_cluster_state', '_commit_length', '_election_duration',
                  '_election_task', '_external_commands_executor',
@@ -126,7 +130,9 @@ class Node:
                            for receiver in self._cluster_state.nodes_ids}
         self._logger = logger
         self._loop = loop
-        self._external_commands_loop = new_event_loop()
+        self._external_commands_loop = event_loops.setdefault(
+                threading.get_ident(), new_event_loop()
+        )
         self._external_commands_executor = to_commands_executor(
                 self._external_commands_loop
         )
