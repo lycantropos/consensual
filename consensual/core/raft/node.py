@@ -407,7 +407,6 @@ class Node:
                 )
                 self._try_commit()
             elif self._history.sent_lengths[reply.node_id] > 0:
-                assert reply.status is SyncStatus.FAILURE, reply.status
                 self._history.sent_lengths[reply.node_id] = (
                         self._history.sent_lengths[reply.node_id] - 1
                 )
