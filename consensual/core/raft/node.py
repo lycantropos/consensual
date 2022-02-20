@@ -580,8 +580,7 @@ class Node:
             start = self._to_time()
             await self._sync_followers_once()
             duration = self._to_time() - start
-            self.logger.debug(
-                    f'{self._id} followers\' sync took {duration}s')
+            self.logger.debug(f'{self._id} followers\' sync took {duration}s')
             await sleep(self._cluster_state.heartbeat - duration
                         - self._to_expected_broadcast_time())
 
