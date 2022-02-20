@@ -32,6 +32,9 @@ class Receiver(_Receiver):
 
     @classmethod
     def from_node(cls, node: _Node) -> 'Receiver':
+        if not isinstance(node.sender, Sender):
+            raise TypeError('node supposed to have compatible sender type, '
+                            f'but found {type(node.sender)}')
         app = _web.Application()
 
         @_web.middleware
