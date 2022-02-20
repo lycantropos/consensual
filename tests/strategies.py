@@ -35,7 +35,10 @@ random_seeds = strategies.integers()
 
 
 def asyncio_waiting_processor(parameters: float) -> None:
-    get_event_loop().run_until_complete(sleep(parameters))
+    loop = get_event_loop()
+    (loop.create_task
+     if loop.is_running()
+     else loop.run_until_complete)(sleep(parameters))
 
 
 def waiting_processor(parameters: float) -> None:
