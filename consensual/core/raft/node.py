@@ -159,12 +159,12 @@ class Node:
         return self._external_processors
 
     @property
-    def url(self) -> URL:
-        return self._url
-
-    @property
     def sender(self) -> Sender:
         return self._sender
+
+    @property
+    def url(self) -> URL:
+        return self._url
 
     async def attach_nodes(self, urls: List[URL]) -> Optional[str]:
         nodes_urls_to_add = {node_url_to_id(node_url): node_url
