@@ -25,7 +25,8 @@ from yarl import URL
 
 from consensual.core.raft.command import Command
 from consensual.raft import (Node,
-                             Processor)
+                             Processor,
+                             aiohttp)
 from .raft_cluster_state import RaftClusterState
 from .raft_node_state import RaftNodeState
 from .utils import MAX_RUNNING_NODES_COUNT
@@ -256,19 +257,23 @@ def run_node(url: URL,
              random_seed: int,
              event: multiprocessing.synchronize.Event) -> None:
     atexit.register(event.set)
+    sender = aiohttp.Sender(heartbeat=heartbeat,
+                            urls=[url])
     node = WrappedNode.from_url(url,
                                 heartbeat=heartbeat,
                                 logger=to_logger(url.authority),
-                                processors=processors)
-    node._app.router.add_get('/states', to_states_handler(node))
-    node._app.middlewares.append(
+                                processors=processors,
+                                sender=sender)
+    receiver = aiohttp.Receiver.from_node(node)
+    receiver.app.router.add_get('/states', to_states_handler(node))
+    receiver.app.middlewares.append(
             to_latency_simulator(max_delay=(heartbeat
                                             / (MAX_RUNNING_NODES_COUNT ** 2)),
                                  random_seed=random_seed)
     )
-    node._app.middlewares.append(to_states_appender(node))
+    receiver.app.middlewares.append(to_states_appender(node))
     url = node.url
-    web.run_app(node._app,
+    web.run_app(receiver.app,
                 host=url.host,
                 port=url.port,
                 loop=node._loop,
