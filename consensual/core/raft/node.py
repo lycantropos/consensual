@@ -285,6 +285,11 @@ class Node:
         await self._process_vote_reply(reply)
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
+        if node_id not in self._cluster_state.nodes_ids:
+            return SyncReply(accepted_length=0,
+                             node_id=node_id,
+                             status=SyncStatus.UNAVAILABLE,
+                             term=self._role.term)
         prefix_length = self._history.sent_lengths[node_id]
         call = SyncCall(cluster_id=self._cluster_state.id,
                         commit_length=self._commit_length,
