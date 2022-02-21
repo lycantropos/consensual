@@ -1,10 +1,9 @@
-import multiprocessing
 from typing import (List,
                     Tuple,
                     TypeVar,
                     overload)
 
-MAX_RUNNING_NODES_COUNT = max(multiprocessing.cpu_count() - 1, 1)
+MAX_RUNNING_NODES_COUNT = 10
 
 
 def implication(antecedent: bool, consequent: bool) -> bool:

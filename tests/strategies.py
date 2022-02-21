@@ -5,11 +5,11 @@ from asyncio import (get_event_loop,
 from operator import add
 from typing import (Any,
                     List,
-                    Sequence,
                     Tuple)
 
 from hypothesis import strategies
 from hypothesis.strategies import SearchStrategy
+from yarl import URL
 
 from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_RUNNING_NODES_COUNT
@@ -18,19 +18,7 @@ data_objects = strategies.data()
 heartbeats = strategies.floats(1, 2)
 delays = strategies.floats(0, 1)
 hosts = strategies.just('localhost')
-ports_ranges_starts = strategies.integers(4000, 4500)
-ports_ranges_lengths = strategies.integers(100, 500)
-
-
-def to_ports_range(start: int, length: int) -> Sequence[int]:
-    assert start > 0
-    assert length >= MAX_RUNNING_NODES_COUNT
-    return range(start, start + length)
-
-
-ports_ranges = strategies.builds(to_ports_range,
-                                 ports_ranges_starts,
-                                 ports_ranges_lengths)
+ports = strategies.integers(4000, 4999)
 random_seeds = strategies.integers()
 
 
@@ -65,13 +53,17 @@ actions = (plain_actions
                                strategies.recursive(plain_actions,
                                                     to_longer_actions),
                                plain_actions))
-processors_parameters = {waiting_processor: strategies.floats(-10, 10),
-                         asyncio_waiting_processor: strategies.floats(-10, 10)}
+processors_parameters = {waiting_processor: strategies.floats(-1, 1),
+                         asyncio_waiting_processor: strategies.floats(-1, 1)}
 processors = strategies.sampled_from(list(processors_parameters))
 processors_dicts = strategies.dictionaries(keys=actions,
                                            values=processors)
-running_nodes_parameters = strategies.tuples(hosts, ports_ranges,
-                                             processors_dicts, random_seeds)
+urls = strategies.builds(URL.build,
+                         scheme=strategies.just('htttp'),
+                         host=hosts,
+                         port=ports)
+running_nodes_parameters = strategies.tuples(urls, processors_dicts,
+                                             random_seeds)
 running_nodes_parameters_lists = strategies.lists(
         running_nodes_parameters,
         min_size=1,
