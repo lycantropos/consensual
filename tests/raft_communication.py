@@ -18,6 +18,7 @@ class RaftReceiver(Receiver):
 
     def __init__(self, node: Node) -> None:
         self.node = node
+        self._is_running = False
 
     __repr__ = generate_repr(__init__)
 
@@ -25,11 +26,24 @@ class RaftReceiver(Receiver):
     def from_node(cls, node: Node) -> 'RaftReceiver':
         return cls(node)
 
+    @property
+    def is_running(self) -> bool:
+        return self._is_running
+
     def start(self) -> None:
+        if self._is_running:
+            return
         result = self.nodes.setdefault(self.node.url.authority,
                                        self.node)
         if result is not self.node:
             raise OSError()
+        else:
+            self._is_running = True
+
+    def stop(self) -> None:
+        if self.is_running:
+            del self.nodes[self.node.url.authority]
+            self._is_running = False
 
 
 class RaftSender(Sender):

@@ -153,6 +153,7 @@ class RaftClusterNode:
     def stop(self) -> None:
         self._new_cluster_state = self._old_cluster_state = None
         self._new_node_state = self._old_node_state = None
+        self._receiver.stop()
         self._receiver = None
         self.raw = None
 
