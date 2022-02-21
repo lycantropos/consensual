@@ -22,7 +22,6 @@ from .raft_node_state import RaftNodeState
 
 class RaftClusterNode:
     def __init__(self,
-                 index: int,
                  url: URL,
                  processors: Dict[str, Processor],
                  random_seed: int,
@@ -30,14 +29,14 @@ class RaftClusterNode:
                  communication: RaftCommunication,
                  loop: AbstractEventLoop,
                  heartbeat: float) -> None:
-        (
-            self.index, self.heartbeat, self.processors, self.random_seed,
-            self.url
-        ) = index, heartbeat, processors, random_seed, url
+        self.heartbeat, self.processors, self.random_seed, self.url = (
+            heartbeat, processors, random_seed, url
+        )
         self._communication = communication
         self._loop = loop
+        self._logger = to_logger(self.url.authority)
         self.raw = WrappedNode.from_url(self.url,
-                                        logger=to_logger(self.url.authority),
+                                        logger=self._logger,
                                         loop=self._loop,
                                         processors=self.processors,
                                         sender=self._to_sender())
@@ -135,7 +134,7 @@ class RaftClusterNode:
         assert self.raw is None
         assert self._receiver is None
         self.raw = WrappedNode.from_url(self.url,
-                                        logger=to_logger(self.url.authority),
+                                        logger=self._logger,
                                         loop=self._loop,
                                         processors=self.processors,
                                         sender=self._to_sender())

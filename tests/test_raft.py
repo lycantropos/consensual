@@ -172,7 +172,6 @@ class RaftNetwork(RuleBasedStateMachine):
                                  communication=self.communication,
                                  heartbeat=heartbeat,
                                  loop=self.loop),
-                         range(len(nodes_parameters)),
                          *transpose(nodes_parameters)))
         succeeded = [node.start() for node in nodes]
         nodes = [node for node, success in zip(nodes, succeeded) if success]
