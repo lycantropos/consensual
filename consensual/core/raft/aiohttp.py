@@ -1,4 +1,5 @@
 import json as _json
+import signal
 from asyncio import (AbstractEventLoop as _AbstractEventLoop,
                      Queue as _Queue,
                      get_event_loop as _get_event_loop,
@@ -89,7 +90,7 @@ class Receiver(_Receiver):
     def stop(self) -> None:
         if self._is_running:
             try:
-                raise _web_runner.GracefulExit()
+                signal.raise_signal(signal.SIGINT)
             finally:
                 self._is_running = False
 
