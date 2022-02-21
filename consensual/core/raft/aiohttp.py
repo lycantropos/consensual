@@ -31,25 +31,23 @@ from .sender import (ReceiverUnavailable as _ReceiverUnavailable,
 
 
 class Receiver(_Receiver):
-    def __init__(self, *, app: _web.Application, node: _Node) -> None:
-        self.app, self.node = app, node
-        self._is_running = False
+    __slots__ = '_app', '_is_running', '_node'
 
-    @classmethod
-    def from_node(cls, node: _Node) -> 'Receiver':
-        if not isinstance(node.sender, Sender):
+    def __new__(cls, _node: _Node) -> 'Receiver':
+        if not isinstance(_node.sender, Sender):
             raise TypeError('node supposed to have compatible sender type, '
-                            f'but found {type(node.sender)}')
-        app = _web.Application()
-        self = cls(app=app,
-                   node=node)
+                            f'but found {type(_node.sender)}')
+        self = super().__new__(cls)
+        self._node = _node
+        self._is_running = False
+        app = self._app = _web.Application()
 
         @_web.middleware
         async def error_middleware(
                 request: _web.Request,
                 handler: _Callable[[_web.Request],
                                    _Awaitable[_web.StreamResponse]],
-                log: _Callable[[str], None] = node.logger.exception
+                log: _Callable[[str], None] = _node.logger.exception
         ) -> _web.StreamResponse:
             try:
                 result = await handler(request)
@@ -66,11 +64,13 @@ class Receiver(_Receiver):
         app.router.add_post('/', self._handle_post)
         app.router.add_route(Sender.HTTP_METHOD, '/',
                              self._handle_communication)
-        for action in node.processors.keys():
+        for action in _node.processors.keys():
             route = app.router.add_post(f'/{action}', self._handle_record)
             resource = route.resource
-            node.logger.debug(f'registered resource {resource.canonical}')
+            _node.logger.debug(f'registered resource {resource.canonical}')
         return self
+
+    __repr__ = _generate_repr(__new__)
 
     @property
     def is_running(self) -> bool:
@@ -78,11 +78,11 @@ class Receiver(_Receiver):
 
     def start(self) -> None:
         assert not self.is_running, 'Already running'
-        url = self.node.url
+        url = self._node.url
         _web.run_app(self.app,
                      host=url.host,
                      port=url.port,
-                     loop=self.node.loop,
+                     loop=self._node.loop,
                      print=lambda message: (self._set_running(True)
                                             or print(message)))
 
@@ -91,7 +91,7 @@ class Receiver(_Receiver):
             try:
                 signal.raise_signal(signal.SIGINT)
             finally:
-                self._is_running = False
+                self._set_running(False)
 
     async def _handle_communication(self, request: _web.Request
                                     ) -> _web_ws.WebSocketResponse:
@@ -100,7 +100,7 @@ class Receiver(_Receiver):
         async for message in websocket:
             message: _web_ws.WSMessage
             contents = message.json()
-            reply = await self.node.receive(
+            reply = await self._node.receive(
                     kind=_MessageKind(contents['kind']),
                     message=contents['message']
             )
@@ -113,9 +113,9 @@ class Receiver(_Receiver):
             raw_nodes_urls = _json.loads(text)
             assert isinstance(raw_nodes_urls, list)
             nodes_urls = [_URL(raw_url) for raw_url in raw_nodes_urls]
-            error_message = await self.node.detach_nodes(nodes_urls)
+            error_message = await self._node.detach_nodes(nodes_urls)
         else:
-            error_message = await self.node.detach()
+            error_message = await self._node.detach()
         result = {'error': error_message}
         return _web.json_response(result)
 
@@ -125,14 +125,14 @@ class Receiver(_Receiver):
             raw_urls = _json.loads(text)
             assert isinstance(raw_urls, list)
             nodes_urls = [_URL(raw_url) for raw_url in raw_urls]
-            error_message = await self.node.attach_nodes(nodes_urls)
+            error_message = await self._node.attach_nodes(nodes_urls)
         else:
-            error_message = await self.node.solo()
+            error_message = await self._node.solo()
         return _web.json_response({'error': error_message})
 
     async def _handle_record(self, request: _web.Request) -> _web.Response:
         parameters = await request.json()
-        error_message = await self.node.enqueue(request.path[1:], parameters)
+        error_message = await self._node.enqueue(request.path[1:], parameters)
         return _web.json_response({'error': error_message})
 
     def _set_running(self, value: bool) -> None:
