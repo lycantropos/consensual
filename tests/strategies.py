@@ -11,6 +11,7 @@ from hypothesis import strategies
 from hypothesis.strategies import SearchStrategy
 from yarl import URL
 
+from consensual.raft import Processor
 from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_RUNNING_NODES_COUNT
 
@@ -71,23 +72,18 @@ running_nodes_parameters_lists = strategies.lists(
 )
 
 
-def to_nodes_with_log_arguments(
-        node_with_path: Tuple[RaftClusterNode, str]
-) -> SearchStrategy[Tuple[RaftClusterNode, str, Any]]:
-    node, path = node_with_path
-    return strategies.tuples(strategies.just(node), strategies.just(path),
-                             processors_parameters[node.processors[path]])
+def to_log_arguments(action_with_processor: Tuple[str, Processor]
+                     ) -> SearchStrategy[Tuple[str, Any]]:
+    action, processor = action_with_processor
+    return strategies.tuples(strategies.just(action),
+                             processors_parameters[processor])
 
 
-def to_nodes_with_log_arguments_lists(
-        nodes: List[RaftClusterNode]
-) -> SearchStrategy[List[Tuple[RaftClusterNode, str, Any]]]:
-    strategies_list = [
-        strategies.tuples(
-                strategies.just(node),
-                strategies.sampled_from(list(node.processors.keys()))
-        ).flatmap(to_nodes_with_log_arguments)
-        for node in nodes
-        if node.processors
-    ]
-    return strategies.tuples(*strategies_list).map(list)
+def to_log_arguments_lists(node: RaftClusterNode
+                           ) -> SearchStrategy[List[Tuple[str, Any]]]:
+    return strategies.lists(
+            (strategies.sampled_from(list(node.processors.items()))
+             .flatmap(to_log_arguments))
+            if node.processors
+            else strategies.nothing()
+    )

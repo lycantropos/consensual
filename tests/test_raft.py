@@ -16,6 +16,7 @@ from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
                                  consumes,
                                  invariant,
+                                 multiple,
                                  precondition,
                                  rule)
 from hypothesis.strategies import DataObject
@@ -145,17 +146,13 @@ class RaftNetwork(RuleBasedStateMachine):
     running_nodes = Bundle('running_nodes')
     shut_down_nodes = Bundle('shut_down_nodes')
 
-    @rule(source_nodes=running_nodes,
-          target_nodes=running_nodes)
+    @rule(source_node=running_nodes,
+          target_node=running_nodes)
     def add_nodes(self,
-                  target_nodes: List[RaftClusterNode],
-                  source_nodes: List[RaftClusterNode]) -> None:
-        source_nodes = source_nodes[:len(target_nodes)]
-        self.loop.run_until_complete(self._wait(
-                [self._attach_node(target_node, source_node)
-                 for target_node, source_node in zip(target_nodes,
-                                                     source_nodes)]
-        ))
+                  target_node: RaftClusterNode,
+                  source_node: RaftClusterNode) -> None:
+        self.loop.run_until_complete(self._attach_node(target_node,
+                                                       source_node))
 
     def is_not_full(self) -> bool:
         return len(self.nodes) < MAX_RUNNING_NODES_COUNT
@@ -180,60 +177,48 @@ class RaftNetwork(RuleBasedStateMachine):
         succeeded = [node.start() for node in nodes]
         nodes = [node for node, success in zip(nodes, succeeded) if success]
         self.nodes += nodes
-        return nodes
+        return multiple(*nodes)
 
-    @rule(nodes=running_nodes)
-    def detach_nodes(self, nodes: List[RaftClusterNode]) -> None:
-        self.loop.run_until_complete(self._wait([self._detach(node)
-                                                 for node in nodes]))
+    @rule(node=running_nodes)
+    def detach_node(self, node: RaftClusterNode) -> None:
+        self.loop.run_until_complete(self._detach(node))
 
-    @rule(source_nodes=running_nodes,
-          target_nodes=running_nodes)
-    def detach_many_nodes(self,
-                          source_nodes: List[RaftClusterNode],
-                          target_nodes: List[RaftClusterNode]) -> None:
-        self.loop.run_until_complete(self._wait(
-                [self._detach_nodes(source_node, target_node)
-                 for source_node, target_node in zip(source_nodes,
-                                                     target_nodes)]
-        ))
+    @rule(source_node=running_nodes,
+          target_node=running_nodes)
+    def detach_nodes(self,
+                     source_node: RaftClusterNode,
+                     target_node: RaftClusterNode) -> None:
+        self.loop.run_until_complete(self._detach_nodes(source_node,
+                                                        target_node))
 
     @rule(data=strategies.data_objects,
-          nodes=running_nodes)
-    def log(self, data: DataObject, nodes: List[RaftClusterNode]) -> None:
-        nodes_with_arguments = data.draw(
-                strategies.to_nodes_with_log_arguments_lists(nodes)
-        )
-        self.loop.run_until_complete(self._wait(
-                [self._enqueue(node, action, parameters)
-                 for node, action, parameters in nodes_with_arguments]
-        ))
+          node=running_nodes)
+    def log(self, data: DataObject, node: RaftClusterNode) -> None:
+        arguments = data.draw(strategies.to_log_arguments_lists(node))
+        for action, parameters in arguments:
+            self.loop.run_until_complete(self._enqueue(node, action,
+                                                       parameters))
 
     @rule(target=running_nodes,
-          nodes=consumes(shut_down_nodes))
-    def restart_nodes(self, nodes: List[RaftClusterNode]
-                      ) -> List[RaftClusterNode]:
-        succeeded = [node.restart() for node in nodes]
-        nodes = [node for node, success in zip(nodes, succeeded) if success]
-        self.nodes += nodes
-        return nodes
+          node=consumes(shut_down_nodes))
+    def restart_node(self, node: RaftClusterNode) -> RaftClusterNode:
+        if node.restart():
+            self.nodes += [node]
+            return node
+        return multiple()
 
     @rule(target=shut_down_nodes,
-          nodes=consumes(running_nodes))
-    def shutdown_nodes(self, nodes: List[RaftClusterNode]
-                       ) -> List[RaftClusterNode]:
-        for node in nodes:
-            node.stop()
-        shut_down_nodes = frozenset(nodes)
-        self.nodes = [node
-                      for node in self.nodes
-                      if node not in shut_down_nodes]
-        return nodes
+          node=consumes(running_nodes))
+    def shutdown_nodes(self, node: RaftClusterNode) -> RaftClusterNode:
+        node.stop()
+        self.nodes = [candidate
+                      for candidate in self.nodes
+                      if candidate is not node]
+        return node
 
-    @rule(nodes=running_nodes)
-    def solo_nodes(self, nodes: List[RaftClusterNode]) -> None:
-        self.loop.run_until_complete(self._wait([self._solo(node)
-                                                 for node in nodes]))
+    @rule(node=running_nodes)
+    def solo_nodes(self, node: RaftClusterNode) -> None:
+        self.loop.run_until_complete(self._solo(node))
 
     def teardown(self) -> None:
         for node in self.nodes:
