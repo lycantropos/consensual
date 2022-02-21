@@ -292,8 +292,10 @@ class RaftNetwork(RuleBasedStateMachine):
         error = await node.enqueue(action, parameters)
         assert (implication(error is None,
                             node.old_node_state.leader_node_id is not None
-                            and (node.old_node_state.id
-                                 in node.old_cluster_state.nodes_ids))
+                            and ((node.old_node_state.role_kind
+                                  is RoleKind.LEADER)
+                                 or (node.old_node_state.id
+                                     in node.old_cluster_state.nodes_ids)))
                 and implication(node.old_node_state.role_kind
                                 is RoleKind.LEADER,
                                 error is None))
