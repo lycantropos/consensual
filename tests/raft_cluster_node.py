@@ -13,11 +13,39 @@ from yarl import URL
 
 from consensual.core.raft.command import Command
 from consensual.raft import (Node,
-                             Processor,
-                             Sender)
+                             Processor)
 from .raft_cluster_state import RaftClusterState
 from .raft_communication import RaftCommunication
 from .raft_node_state import RaftNodeState
+
+
+class WrappedNode(Node):
+    __slots__ = 'processed_external_commands', 'processed_internal_commands'
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.processed_external_commands = []
+        self.processed_internal_commands = []
+
+    def _process_commands(self,
+                          commands: List[Command],
+                          processors: Mapping[str, Processor]) -> None:
+        assert all(command.external is commands[0].external
+                   for command in commands)
+        processed_commands = ((self.processed_external_commands
+                               if commands[0].external
+                               else self.processed_internal_commands)
+                              if commands
+                              else None)
+        super()._process_commands(commands, processors)
+        if not commands:
+            return
+        processed_commands += commands
+
+    def _reset(self) -> None:
+        super()._reset()
+        self.processed_external_commands = []
+        self.processed_internal_commands = []
 
 
 class RaftClusterNode:
@@ -35,11 +63,7 @@ class RaftClusterNode:
         self._communication = communication
         self._loop = loop
         self._logger = to_logger(self.url.authority)
-        self.raw = WrappedNode.from_url(self.url,
-                                        logger=self._logger,
-                                        loop=self._loop,
-                                        processors=self.processors,
-                                        sender=self._to_sender())
+        self.raw = self._to_raw()
         self._receiver = self._communication.to_receiver(self.raw)
         self._old_cluster_state: Optional[RaftClusterState] = None
         self._old_node_state: Optional[RaftNodeState] = None
@@ -133,11 +157,7 @@ class RaftClusterNode:
     def restart(self) -> bool:
         assert self.raw is None
         assert self._receiver is None
-        self.raw = WrappedNode.from_url(self.url,
-                                        logger=self._logger,
-                                        loop=self._loop,
-                                        processors=self.processors,
-                                        sender=self._to_sender())
+        self.raw = self._to_raw()
         self._receiver = self._communication.to_receiver(self.raw)
         return self.start()
 
@@ -156,11 +176,15 @@ class RaftClusterNode:
         self._receiver = None
         self.raw = None
 
-    def _to_sender(self) -> Sender:
-        return self._communication.to_sender([self.url])
-        return SenderWithSimulatedLatency([self.url],
-                                          max_delay=2 * self.heartbeat,
-                                          random_seed=self.random_seed)
+    def _to_raw(self) -> WrappedNode:
+        return WrappedNode.from_url(
+                self.url,
+                logger=self._logger,
+                loop=self._loop,
+                processors=self.processors,
+                heartbeat=self.heartbeat,
+                sender=self._communication.to_sender([self.url])
+        )
 
     @contextmanager
     def _update_states(self) -> None:
@@ -191,35 +215,6 @@ def is_resetted_node(node: RaftClusterNode) -> bool:
             and not node.new_cluster_state.id
             and not node.new_node_state.log
             and node.new_node_state.term == 0)
-
-
-class WrappedNode(Node):
-    __slots__ = 'processed_external_commands', 'processed_internal_commands'
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.processed_external_commands = []
-        self.processed_internal_commands = []
-
-    def _process_commands(self,
-                          commands: List[Command],
-                          processors: Mapping[str, Processor]) -> None:
-        assert all(command.external is commands[0].external
-                   for command in commands)
-        processed_commands = ((self.processed_external_commands
-                               if commands[0].external
-                               else self.processed_internal_commands)
-                              if commands
-                              else None)
-        super()._process_commands(commands, processors)
-        if not commands:
-            return
-        processed_commands += commands
-
-    def _reset(self) -> None:
-        super()._reset()
-        self.processed_external_commands = []
-        self.processed_internal_commands = []
 
 
 def to_logger(name: str,
