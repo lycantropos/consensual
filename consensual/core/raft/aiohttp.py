@@ -15,7 +15,6 @@ from aiohttp import (ClientError as _ClientError,
                      ClientSession as _ClientSession,
                      hdrs as _hdrs,
                      web as _web,
-                     web_runner as _web_runner,
                      web_ws as _web_ws)
 from reprit.base import generate_repr as _generate_repr
 from yarl import URL as _URL
