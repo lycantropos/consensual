@@ -26,11 +26,10 @@ class RaftReceiver(Receiver):
 
     def start(self) -> None:
         if self._is_running:
-            return
-        result = self.nodes.setdefault(self.node.url.authority,
-                                       self.node)
+            raise RuntimeError('is already running')
+        result = self.nodes.setdefault(self.node.url.authority, self.node)
         if result is not self.node:
-            raise OSError()
+            raise OSError('already exists')
         else:
             self._is_running = True
 
