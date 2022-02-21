@@ -745,11 +745,10 @@ class Node:
             command = Command(action=InternalAction.STABILIZE_CLUSTER,
                               parameters=cluster_state.new.as_json(),
                               internal=True)
-            record = Record(cluster_id=self._cluster_state.id,
-                            command=command,
-                            term=self._role.term)
-            self.logger.warning(f'{self._id} appends {record}')
-            append_record(self._history, record)
+            append_record(self._history,
+                          Record(cluster_id=self._cluster_state.id,
+                                 command=command,
+                                 term=self._role.term))
             self._update_cluster_state(cluster_state.new)
             self._restart_sync_timer()
 
