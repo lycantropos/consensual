@@ -417,8 +417,9 @@ class Node:
 
     async def _receive_update_call(self, call: UpdateCall) -> UpdateReply:
         self.logger.debug(f'{self._id} processes {call}')
-        if (len(self._cluster_state.nodes_ids) == 1
-                and not call.cluster_state.nodes_ids):
+        if (not call.cluster_state.nodes_ids
+                and len(self._cluster_state.nodes_ids) == 1
+                and self._id in self._cluster_state.nodes_ids):
             if self._cluster_state.id:
                 self._detach()
             else:
