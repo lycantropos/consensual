@@ -334,7 +334,8 @@ class Node:
                 )
             except (ReceiverUnavailable, TimeoutError):
                 return LogReply(status=LogStatus.UNAVAILABLE)
-        elif call.node_id not in self._cluster_state.nodes_ids:
+        elif (call.node_id not in self._cluster_state.nodes_ids
+              and call.node_id != self._id):
             return LogReply(status=LogStatus.REJECTED)
         else:
             append_record(self._history,
@@ -807,7 +808,8 @@ class Node:
                                        self._external_processors)
 
     def _try_commit(self) -> None:
-        while (self._commit_length < len(self._history.log)
+        while (self._role.kind is RoleKind.LEADER
+               and self._commit_length < len(self._history.log)
                and self._cluster_state.has_majority(
                         to_nodes_ids_that_accepted_more_records(
                                 self._history, self._commit_length
