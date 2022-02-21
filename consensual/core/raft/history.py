@@ -73,7 +73,13 @@ class SyncHistory:
         return RegularHistory(self.log)
 
     def with_nodes_ids(self, nodes_ids: Collection[NodeId]) -> 'SyncHistory':
-        return self.from_nodes_ids(self.log, nodes_ids)
+        accepted_lengths = {node_id: self.accepted_lengths.get(node_id, 0)
+                            for node_id in nodes_ids}
+        sent_lengths = {node_id: self.sent_lengths.get(node_id, len(self.log))
+                        for node_id in nodes_ids}
+        return SyncHistory(self.log,
+                           accepted_lengths=accepted_lengths,
+                           sent_lengths=sent_lengths)
 
 
 History = Union[RegularHistory, SyncHistory]
