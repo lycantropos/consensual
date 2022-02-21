@@ -14,6 +14,7 @@ from aiohttp import (ClientError as _ClientError,
                      ClientSession as _ClientSession,
                      hdrs as _hdrs,
                      web as _web,
+                     web_runner as _web_runner,
                      web_ws as _web_ws)
 from reprit.base import generate_repr as _generate_repr
 from yarl import URL as _URL
@@ -32,6 +33,7 @@ from .sender import (ReceiverUnavailable as _ReceiverUnavailable,
 class Receiver(_Receiver):
     def __init__(self, *, app: _web.Application, node: _Node) -> None:
         self.app, self.node = app, node
+        self._is_running = False
 
     @classmethod
     def from_node(cls, node: _Node) -> 'Receiver':
@@ -70,12 +72,26 @@ class Receiver(_Receiver):
             node.logger.debug(f'registered resource {resource.canonical}')
         return self
 
+    @property
+    def is_running(self) -> bool:
+        return self._is_running
+
     def start(self) -> None:
+        assert not self.is_running, 'Already running'
         url = self.node.url
         _web.run_app(self.app,
                      host=url.host,
                      port=url.port,
-                     loop=self.node.loop)
+                     loop=self.node.loop,
+                     print=lambda message: (self._set_running(True)
+                                            or print(message)))
+
+    def stop(self) -> None:
+        if self._is_running:
+            try:
+                raise _web_runner.GracefulExit()
+            finally:
+                self._is_running = False
 
     async def _handle_communication(self, request: _web.Request
                                     ) -> _web_ws.WebSocketResponse:
@@ -118,6 +134,9 @@ class Receiver(_Receiver):
         parameters = await request.json()
         error_message = await self.node.enqueue(request.path[1:], parameters)
         return _web.json_response({'error': error_message})
+
+    def _set_running(self, value: bool) -> None:
+        self._is_running = value
 
 
 class Sender(_Sender):
