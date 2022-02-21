@@ -1,12 +1,9 @@
-from asyncio import (Future,
-                     get_event_loop,
-                     wait)
+from asyncio import get_event_loop
 from collections import (Counter,
                          defaultdict)
 from functools import partial
 from operator import eq
 from typing import (Any,
-                    Awaitable,
                     Dict,
                     List,
                     Sequence,
@@ -306,13 +303,6 @@ class RaftNetwork(RuleBasedStateMachine):
                 and node.new_node_state.id in node.new_cluster_state.nodes_ids
                 and len(node.new_cluster_state.nodes_ids) == 1
                 and node.new_node_state.role_kind is RoleKind.LEADER)
-
-    async def _wait(self, awaitables: List[Awaitable]
-                    ) -> Tuple[List[Future], List[Future]]:
-        return (await wait([self.loop.create_task(awaitable)
-                            for awaitable in awaitables])
-                if awaitables
-                else ([], []))
 
 
 TestCluster = RaftNetwork.TestCase
