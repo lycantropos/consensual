@@ -77,7 +77,8 @@ class Receiver(_Receiver):
         return self._is_running
 
     def start(self) -> None:
-        assert not self.is_running, 'Already running'
+        if self.is_running:
+            raise RuntimeError('Already running')
         url = self._node.url
         _web.run_app(self.app,
                      host=url.host,
