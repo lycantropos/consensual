@@ -14,17 +14,11 @@ from consensual.raft import (MessageKind,
 
 
 class RaftReceiver(Receiver):
-    nodes: MutableMapping[str, Node]
-
-    def __init__(self, node: Node) -> None:
-        self.node = node
+    def __init__(self, node: Node, nodes: MutableMapping[str, Node]) -> None:
+        self.node, self.nodes = node, nodes
         self._is_running = False
 
     __repr__ = generate_repr(__init__)
-
-    @classmethod
-    def from_node(cls, node: Node) -> 'RaftReceiver':
-        return cls(node)
 
     @property
     def is_running(self) -> bool:
@@ -47,10 +41,9 @@ class RaftReceiver(Receiver):
 
 
 class RaftSender(Sender):
-    nodes: Mapping[str, Node]
-
-    def __init__(self, urls: Collection[URL]) -> None:
-        self.urls = urls
+    def __init__(self, urls: Collection[URL], nodes: Mapping[str, Node]
+                 ) -> None:
+        self.nodes, self.urls = nodes, urls
 
     __repr__ = generate_repr(__init__)
 
@@ -73,11 +66,7 @@ class RaftCommunication:
     __repr__ = generate_repr(__init__)
 
     def to_receiver(self, node: Node) -> Receiver:
-        result = RaftReceiver.from_node(node)
-        result.nodes = self.nodes
-        return result
+        return RaftReceiver(node, self.nodes)
 
     def to_sender(self, urls: Collection[URL]) -> Sender:
-        result = RaftSender(urls)
-        result.nodes = self.nodes
-        return result
+        return RaftSender(urls, self.nodes)
