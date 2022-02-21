@@ -542,6 +542,7 @@ class Node:
                          receiver: NodeId,
                          kind: MessageKind,
                          message: Dict[str, Any]) -> Dict[str, Any]:
+        latencies = self._latencies[receiver]
         receiver_url = self._cluster_state.nodes_urls[receiver]
         message_start = self._to_time()
         result = await self._sender.send(kind=kind,
@@ -549,7 +550,7 @@ class Node:
                                          url=receiver_url)
         reply_end = self._to_time()
         latency = reply_end - message_start
-        self._latencies[receiver].append(latency)
+        latencies.append(latency)
         return result
 
     async def _send_log_call(self, node_id: NodeId, call: LogCall) -> LogReply:
