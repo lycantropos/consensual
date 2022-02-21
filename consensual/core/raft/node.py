@@ -308,6 +308,10 @@ class Node:
                              term=self._role.term)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
+        if node_id not in self._cluster_state.nodes_ids:
+            return VoteReply(node_id=node_id,
+                             status=VoteStatus.UNAVAILABLE,
+                             term=self._role.term)
         call = VoteCall(node_id=self._id,
                         term=self._role.term,
                         log_length=len(self._history.log),
