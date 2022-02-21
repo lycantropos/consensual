@@ -140,8 +140,8 @@ class Node:
                                                      if processors is None
                                                      else processors)
         self._internal_processors = MappingProxyType({
-            InternalAction.SEPARATE_CLUSTERS: Node._separate_clusters,
-            InternalAction.STABILIZE_CLUSTER: Node._stabilize_cluster
+            InternalAction.SEPARATE_CLUSTERS: self._separate_clusters,
+            InternalAction.STABILIZE_CLUSTER: self._stabilize_cluster
         })
         self._election_duration = 0
         self._election_task = self._loop.create_future()
