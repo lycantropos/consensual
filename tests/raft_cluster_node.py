@@ -254,6 +254,7 @@ def to_logger(name: str,
                       '()': FilterRecordsWithGreaterLevel,
                       'max_level': logging.WARNING,
                   }
-              }}
+              },
+              'disable_existing_loggers': False}
     logging.config.dictConfig(config)
     return logging.getLogger(name)
