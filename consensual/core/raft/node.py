@@ -578,6 +578,8 @@ class Node:
         return UpdateReply.from_json(**raw_reply)
 
     async def _sync_follower(self, node_id: NodeId) -> None:
+        if self._role.kind is not RoleKind.LEADER:
+            return
         reply = await self._call_sync(node_id)
         await self._receive_sync_reply(reply)
 
