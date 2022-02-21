@@ -91,9 +91,9 @@ steps:
     displayName: 'Run doctests'
   - bash: python -m pip install -r requirements-tests.txt
     displayName: 'Install tests dependencies'
-  - bash: coverage run -m pytest
+  - bash: coverage run --append -m pytest
     displayName: 'Run tests'
-  - bash: coverage combine --append && coverage xml
+  - bash: coverage xml
     displayName: 'Collect coverage'
   - bash: python -m codecov -f coverage.xml -X gcov --build "$AGENT_JOBNAME"
     condition: succeeded()
