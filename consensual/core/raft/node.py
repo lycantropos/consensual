@@ -174,22 +174,22 @@ class Node:
         return self._url
 
     async def attach_nodes(self, urls: List[URL]) -> Optional[str]:
-        nodes_urls_to_add = {node_url_to_id(node_url): node_url
-                             for node_url in urls}
-        existing_nodes_ids = (nodes_urls_to_add.keys()
+        nodes_urls_to_attach = {node_url_to_id(node_url): node_url
+                                for node_url in urls}
+        existing_nodes_ids = (nodes_urls_to_attach.keys()
                               & set(self._cluster_state.nodes_ids))
         if existing_nodes_ids:
             return ('already existing node(s) found: '
                     f'{itemize(existing_nodes_ids)}')
-        self.logger.debug(f'{self._id} initializes '
-                          f'adding of {itemize(nodes_urls_to_add)}')
+        self.logger.info(f'{self._id} initializes '
+                         f'attachment of {itemize(nodes_urls_to_attach)}')
         call = UpdateCall(
                 cluster_state=DisjointClusterState(
                         generate_cluster_id(),
                         heartbeat=self._cluster_state.heartbeat,
                         nodes_urls=unite_mappings(
                                 self._cluster_state.nodes_urls,
-                                nodes_urls_to_add
+                                nodes_urls_to_attach
                         ),
                         stable=False
                 ),
@@ -199,7 +199,7 @@ class Node:
         return update_status_to_error_message(reply.status)
 
     async def detach(self) -> Optional[str]:
-        self.logger.debug(f'{self._id} gets removed')
+        self.logger.info(f'{self._id} gets detached')
         rest_nodes_urls = dict(self._cluster_state.nodes_urls)
         rest_nodes_urls.pop(self._id, None)
         call = UpdateCall(
@@ -215,18 +215,17 @@ class Node:
         return update_status_to_error_message(reply.status)
 
     async def detach_nodes(self, urls: List[URL]) -> Optional[str]:
-        nodes_urls_to_delete = {node_url_to_id(node_url): node_url
+        nodes_urls_to_detach = {node_url_to_id(node_url): node_url
                                 for node_url in urls}
-        nonexistent_nodes_ids = (nodes_urls_to_delete.keys()
+        nonexistent_nodes_ids = (nodes_urls_to_detach.keys()
                                  - set(self._cluster_state.nodes_ids))
         if nonexistent_nodes_ids:
             return ('nonexistent node(s) found: '
                     f'{itemize(nonexistent_nodes_ids)}')
-        self.logger.debug(f'{self._id} initializes '
-                          f'removal of {itemize(nodes_urls_to_delete)}')
-        rest_nodes_urls = subtract_mapping(
-                self._cluster_state.nodes_urls,
-                nodes_urls_to_delete)
+        self.logger.info(f'{self._id} initializes '
+                         f'detachment of {itemize(nodes_urls_to_detach)}')
+        rest_nodes_urls = subtract_mapping(self._cluster_state.nodes_urls,
+                                           nodes_urls_to_detach)
         call = UpdateCall(
                 cluster_state=DisjointClusterState(
                         generate_cluster_id(),
@@ -240,6 +239,8 @@ class Node:
         return update_status_to_error_message(reply.status)
 
     async def enqueue(self, action: str, parameters: Any) -> Optional[str]:
+        self.logger.info(f'{self._id} enqueues "{action}" '
+                         f'with parameters {parameters}')
         assert action in self.processors, action
         call = LogCall(command=Command(action=action,
                                        parameters=parameters,
@@ -270,7 +271,7 @@ class Node:
         return reply.as_json()
 
     async def solo(self) -> Optional[str]:
-        self.logger.debug(f'{self._id} solos')
+        self.logger.info(f'{self._id} solos')
         self._update_cluster_state(DisjointClusterState(
                 generate_cluster_id(),
                 heartbeat=self._cluster_state.heartbeat,
@@ -589,7 +590,7 @@ class Node:
         await self._receive_sync_reply(reply)
 
     async def _sync_followers(self) -> None:
-        self.logger.info(f'{self._id} syncs followers')
+        self.logger.debug(f'{self._id} syncs followers')
         while self._role.kind is RoleKind.LEADER:
             start = self._to_time()
             await self._sync_followers_once()
@@ -678,16 +679,15 @@ class Node:
 
     def _follow(self, leader_node_id: NodeId) -> None:
         assert self._id != leader_node_id, leader_node_id
-        self.logger.info(f'{self._id} follows {leader_node_id} '
-                         f'in term {self._role.term}')
+        self.logger.debug(f'{self._id} follows {leader_node_id} '
+                          f'in term {self._role.term}')
         self._history = self._history.to_regular()
         self._role = Follower(leader_node_id=leader_node_id,
                               term=self._role.term)
         self._cancel_election_timer()
 
     def _lead(self) -> None:
-        self.logger.info(f'{self._id} is leader '
-                         f'of term {self._role.term}')
+        self.logger.debug(f'{self._id} is leader of term {self._role.term}')
         self._history = SyncHistory.from_nodes_ids(
                 self._history.log, self._cluster_state.nodes_ids
         )
