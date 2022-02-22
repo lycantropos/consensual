@@ -285,11 +285,7 @@ class Node:
         await self._process_vote_reply(reply)
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
-        if node_id not in self._cluster_state.nodes_ids:
-            return SyncReply(accepted_length=0,
-                             node_id=node_id,
-                             status=SyncStatus.UNAVAILABLE,
-                             term=self._role.term)
+        assert self._role.kind is RoleKind.LEADER
         prefix_length = self._history.sent_lengths[node_id]
         call = SyncCall(cluster_id=self._cluster_state.id,
                         commit_length=self._commit_length,
@@ -313,10 +309,7 @@ class Node:
                              term=self._role.term)
 
     async def _call_vote(self, node_id: NodeId) -> VoteReply:
-        if node_id not in self._cluster_state.nodes_ids:
-            return VoteReply(node_id=node_id,
-                             status=VoteStatus.UNAVAILABLE,
-                             term=self._role.term)
+        assert self._role.kind is RoleKind.CANDIDATE
         call = VoteCall(node_id=self._id,
                         term=self._role.term,
                         log_length=len(self._history.log),
@@ -550,6 +543,9 @@ class Node:
                          receiver: NodeId,
                          kind: MessageKind,
                          message: Dict[str, Any]) -> Dict[str, Any]:
+        if receiver == self._id:
+            return await self.receive(kind=kind,
+                                      message=message)
         latencies = self._latencies[receiver]
         receiver_url = self._cluster_state.nodes_urls[receiver]
         message_start = self._to_time()
@@ -829,7 +825,11 @@ class Node:
         self._sender.urls = cluster_state.nodes_urls.values()
         self._update_latencies(cluster_state.nodes_ids)
         update_nodes_ids(self._role, cluster_state.nodes_ids)
-        self._history = self._history.with_nodes_ids(cluster_state.nodes_ids)
+        self._history = self._history.with_nodes_ids(
+                set(cluster_state.nodes_ids) | {self._id}
+                if self._role.kind is RoleKind.LEADER
+                else cluster_state.nodes_ids
+        )
         self._cluster_state = cluster_state
 
     def _update_latencies(self, new_nodes_ids: Collection[NodeId]) -> None:
