@@ -1,4 +1,3 @@
-from . import aiohttp
 from .hints import Processor
 from .messages import MessageKind
 from .node import Node

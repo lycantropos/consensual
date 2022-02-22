@@ -3,8 +3,7 @@ from .core.raft import (MessageKind,
                         Processor,
                         Receiver,
                         ReceiverUnavailable,
-                        Sender,
-                        aiohttp)
+                        Sender)
 
 MessageKind = MessageKind
 Node = Node
@@ -12,4 +11,3 @@ Processor = Processor
 Receiver = Receiver
 ReceiverUnavailable = ReceiverUnavailable
 Sender = Sender
-aiohttp = aiohttp
