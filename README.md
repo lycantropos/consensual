@@ -110,7 +110,7 @@ Usage
 ...             await sleep(2 * heartbeat),
 ...             await node.detach(),
 ...             await other_node.attach_nodes([node.url]),
-...             await sleep(2 * heartbeat)]
+...             await sleep(3 * heartbeat)]
 >>> error_messages = loop.run_until_complete(run())
 >>> receiver.stop()
 >>> other_receiver.stop()
