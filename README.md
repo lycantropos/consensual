@@ -66,6 +66,67 @@ Install
 python setup.py install
 ```
 
+Usage
+-----
+
+```python
+>>> from consensual.raft import Node, communication
+>>> from yarl import URL
+>>> node_url = URL.build(scheme='http',
+...                      host='localhost',
+...                      port=6000)
+>>> other_node_url = URL.build(scheme='http',
+...                            host='localhost',
+...                            port=6001)
+>>> heartbeat = 0.1
+>>> from typing import Any
+>>> processed_parameters = []
+>>> def dummy_processor(parameters: Any) -> None:
+...     processed_parameters.append(parameters)
+>>> processors = {'dummy': dummy_processor}
+>>> nodes = {}
+>>> sender = communication.Sender([node_url], nodes)
+>>> other_sender = communication.Sender([other_node_url], nodes)
+>>> node = Node.from_url(node_url,
+...                      heartbeat=heartbeat,
+...                      processors=processors,
+...                      sender=sender)
+>>> other_node = Node.from_url(other_node_url,
+...                            heartbeat=heartbeat,
+...                            processors=processors,
+...                            sender=other_sender)
+>>> receiver = communication.Receiver(node, nodes)
+>>> other_receiver = communication.Receiver(other_node, nodes)
+>>> receiver.start()
+>>> other_receiver.start()
+>>> from asyncio import get_event_loop, sleep
+>>> loop = get_event_loop()
+>>> async def run() -> None:
+...     return [await node.solo(),
+...             await node.attach_nodes([other_node.url]),
+...             await sleep(heartbeat),
+...             await other_node.enqueue('dummy', 42),
+...             await other_node.detach_nodes([node.url]),
+...             await sleep(2 * heartbeat),
+...             await node.detach(),
+...             await other_node.attach_nodes([node.url]),
+...             await sleep(2 * heartbeat)]
+>>> error_messages = loop.run_until_complete(run())
+>>> all(error_message is None for error_message in error_messages)
+True
+>>> len(processed_parameters)
+3
+>>> all(parameters == 42 for parameters in processed_parameters)
+True
+>>> receiver.stop()
+>>> other_receiver.stop()
+
+```
+
+We can also replace builtin `consensual.raft.communication` communication layer
+with another one (like [`consensual_http`](https://pypi.org/project/consensual-http/)
+which is built on top of HTTP) and usage patterns may change too.
+
 Development
 -----------
 
