@@ -73,7 +73,7 @@ class Follower:
 
     @leader_node_id.setter
     def leader_node_id(self, value: Optional[NodeId]) -> None:
-        assert value is None or value != self.leader_node_id
+        assert value is None
         self._leader_node_id = value
 
     @property
