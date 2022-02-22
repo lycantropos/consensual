@@ -225,12 +225,12 @@ def to_logger(name: str,
     stderr_handler = {'class': 'logging.StreamHandler',
                       'formatter': 'console',
                       'level': logging.WARNING,
-                      'stream': sys.stderr}
+                      'stream': sys.stderr.reconfigure(encoding='utf-8')}
     stdout_handler = {'class': 'logging.StreamHandler',
                       'filters': ['stdout'],
                       'formatter': 'console',
                       'level': logging.DEBUG,
-                      'stream': sys.stdout}
+                      'stream': sys.stdout.reconfigure(encoding='utf-8')}
     handlers = {'stderr': stderr_handler,
                 'stdout': stdout_handler}
     loggers = {name: {'level': logging.INFO,
