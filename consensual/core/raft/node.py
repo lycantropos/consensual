@@ -368,8 +368,7 @@ class Node:
         self._restart_reelection_timer()
         if call.term > self._role.term:
             self._withdraw(call.term)
-        if (call.term == self._role.term
-                and self._role.leader_node_id is None):
+        if call.term == self._role.term and self._id != call.node_id:
             self._follow(call.node_id)
         states_agree = (
                 call.term == self._role.term
