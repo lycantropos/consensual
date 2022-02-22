@@ -681,6 +681,7 @@ class Node:
             raise exception
 
     def _follow(self, leader_node_id: NodeId) -> None:
+        assert self._id != leader_node_id, leader_node_id
         self.logger.info(f'{self._id} follows {leader_node_id} '
                          f'in term {self._role.term}')
         self._history = self._history.to_regular()
