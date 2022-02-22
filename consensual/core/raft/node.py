@@ -544,9 +544,7 @@ class Node:
                               f'for term {self._role.term} '
                               f'took {duration}s, '
                               f'timeout: {self._election_duration}, '
-                              f'role: {self._role.kind.name}, '
-                              f'supporters count: '
-                              f'{len(self._role.supporters_nodes_ids)}')
+                              f'role: {self._role.kind.name}')
             await sleep(self._election_duration - duration)
 
     async def _send_json(self,
