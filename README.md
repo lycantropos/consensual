@@ -104,13 +104,13 @@ Usage
 >>> async def run() -> None:
 ...     return [await node.solo(),
 ...             await node.attach_nodes([other_node.url]),
-...             await sleep(4 * heartbeat),
+...             await sleep(1),
 ...             await other_node.enqueue('dummy', 42),
 ...             await other_node.detach_nodes([node.url]),
-...             await sleep(4 * heartbeat),
+...             await sleep(1),
 ...             await node.detach(),
 ...             await other_node.attach_nodes([node.url]),
-...             await sleep(4 * heartbeat)]
+...             await sleep(1)]
 >>> error_messages = loop.run_until_complete(run())
 >>> receiver.stop()
 >>> other_receiver.stop()
