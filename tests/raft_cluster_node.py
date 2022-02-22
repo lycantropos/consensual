@@ -82,11 +82,11 @@ class RaftClusterNode:
 
     @property
     def cluster_state(self) -> RaftClusterState:
-        node = self.raw
-        return RaftClusterState(node._cluster_state.id,
-                                heartbeat=node._cluster_state.heartbeat,
-                                nodes_ids=list(node._cluster_state.nodes_ids),
-                                stable=node._cluster_state.stable)
+        raw = self.raw
+        return RaftClusterState(raw._cluster_state.id,
+                                heartbeat=raw._cluster_state.heartbeat,
+                                nodes_ids=list(raw._cluster_state.nodes_ids),
+                                stable=raw._cluster_state.stable)
 
     @property
     def communication(self) -> RaftCommunication:
@@ -106,19 +106,17 @@ class RaftClusterNode:
 
     @property
     def node_state(self) -> RaftNodeState:
-        node = self.raw
-        return RaftNodeState(
-                node._id,
-                commit_length=node._commit_length,
-                leader_node_id=node._role.leader_node_id,
-                log=list(node._history.log),
-                processed_external_commands
-                =list(node.processed_external_commands),
-                processed_internal_commands
-                =list(node.processed_internal_commands),
-                role_kind=node._role.kind,
-                term=node._role.term
-        )
+        raw = self.raw
+        return RaftNodeState(raw._id,
+                             commit_length=raw._commit_length,
+                             leader_node_id=raw._role.leader_node_id,
+                             log=list(raw._history.log),
+                             processed_external_commands
+                             =list(raw.processed_external_commands),
+                             processed_internal_commands
+                             =list(raw.processed_internal_commands),
+                             role_kind=raw._role.kind,
+                             term=raw._role.term)
 
     @property
     def old_cluster_state(self) -> RaftClusterState:
