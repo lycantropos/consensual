@@ -100,10 +100,12 @@ class RaftNetwork(RuleBasedStateMachine):
                                     for record in node.new_node_state.log
                                     if record.command.internal]
                                    for node in self.nodes]
-        assert all(len(node.new_node_state.processed_external_commands)
-                   + len(node.new_node_state.processed_internal_commands)
-                   <= node.new_node_state.commit_length
-                   for node in self.nodes)
+        assert all(len(node_state.processed_external_commands)
+                   + len(node_state.processed_internal_commands)
+                   <= node_state.commit_length
+                   for node in self.nodes
+                   for node_state in [node.new_node_state,
+                                      node.old_node_state])
         assert all(
                 (len(external_commands)
                  >= len(node.new_node_state.processed_external_commands))
