@@ -503,9 +503,13 @@ class Node:
               or reply.status is VoteStatus.UNAVAILABLE):
             pass
         elif reply.status is VoteStatus.REJECTS:
-            assert (not self._cluster_state.stable
+            assert (
+                    not self._cluster_state.stable
                     and (self._id
-                         not in self._cluster_state.new.nodes_ids))
+                         not in self._cluster_state.new.nodes_ids)
+            ), (
+                self._cluster_state
+            )
             self._role.rejectors_nodes_ids.add(reply.node_id)
             if self._cluster_state.new.has_majority(
                     self._role.rejectors_nodes_ids):
