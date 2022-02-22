@@ -112,14 +112,14 @@ Usage
 ...             await other_node.attach_nodes([node.url]),
 ...             await sleep(2 * heartbeat)]
 >>> error_messages = loop.run_until_complete(run())
+>>> receiver.stop()
+>>> other_receiver.stop()
 >>> all(error_message is None for error_message in error_messages)
 True
 >>> len(processed_parameters)
 3
 >>> all(parameters == 42 for parameters in processed_parameters)
 True
->>> receiver.stop()
->>> other_receiver.stop()
 
 ```
 
