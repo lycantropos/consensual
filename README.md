@@ -78,7 +78,7 @@ Usage
 >>> other_node_url = URL.build(scheme='http',
 ...                            host='localhost',
 ...                            port=6001)
->>> heartbeat = 0.1
+>>> heartbeat = 0.5
 >>> from typing import Any
 >>> processed_parameters = []
 >>> def dummy_processor(parameters: Any) -> None:
@@ -104,17 +104,17 @@ Usage
 >>> async def run() -> None:
 ...     return [await node.solo(),
 ...             await node.attach_nodes([other_node.url]),
-...             await sleep(1),
+...             await sleep(10 * heartbeat),
 ...             await other_node.enqueue('dummy', 42),
 ...             await other_node.detach_nodes([node.url]),
-...             await sleep(1),
+...             await sleep(10 * heartbeat),
 ...             await node.detach(),
 ...             await other_node.attach_nodes([node.url]),
-...             await sleep(1)]
+...             await sleep(10 * heartbeat)]
 >>> error_messages = loop.run_until_complete(run())
 >>> receiver.stop()
 >>> other_receiver.stop()
->>> all(error_message is None for error_message in error_messages)
+>>> all(error_message is None for error_message in error_messages) or error_messages
 True
 >>> len(processed_parameters)
 3
