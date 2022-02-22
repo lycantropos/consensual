@@ -13,6 +13,8 @@ class ReceiverUnavailable(Exception):
 
 
 class Sender(ABC):
+    __slots__ = ()
+
     urls: Collection[URL]
 
     @abstractmethod
