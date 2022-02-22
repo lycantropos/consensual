@@ -78,8 +78,8 @@ Usage
 >>> other_node_url = URL.build(scheme='http',
 ...                            host='localhost',
 ...                            port=6001)
->>> heartbeat = 0.5
->>> from typing import Any
+>>> heartbeat = 0.1
+>>> from typing import Any, Optional
 >>> processed_parameters = []
 >>> def dummy_processor(parameters: Any) -> None:
 ...     processed_parameters.append(parameters)
@@ -99,25 +99,21 @@ Usage
 >>> other_receiver = communication.Receiver(other_node, nodes)
 >>> receiver.start()
 >>> other_receiver.start()
->>> from asyncio import get_event_loop, sleep
->>> loop = get_event_loop()
+>>> def assert_is_none(value: Optional[Any]) -> None:
+...     assert value is None, value
 >>> async def run() -> None:
-...     return [await node.solo(),
-...             await node.attach_nodes([other_node.url]),
-...             await sleep(10 * heartbeat),
-...             await other_node.enqueue('dummy', 42),
-...             await other_node.detach_nodes([node.url]),
-...             await sleep(10 * heartbeat),
-...             await node.detach(),
-...             await other_node.attach_nodes([node.url]),
-...             await sleep(10 * heartbeat)]
->>> error_messages = loop.run_until_complete(run())
+...     assert_is_none(await node.solo())
+...     assert_is_none(await node.attach_nodes([other_node.url]))
+...     assert_is_none(await node.enqueue('dummy', 42))
+...     assert_is_none(await other_node.detach_nodes([node.url]))
+...     assert_is_none(await node.detach())
+...     assert_is_none(await other_node.attach_nodes([node.url]))
+...     assert_is_none(await other_node.enqueue('dummy', 42))
+>>> from asyncio import get_event_loop
+>>> loop = get_event_loop()
+>>> loop.run_until_complete(run())
 >>> receiver.stop()
 >>> other_receiver.stop()
->>> all(error_message is None for error_message in error_messages) or error_messages
-True
->>> len(processed_parameters)
-3
 >>> all(parameters == 42 for parameters in processed_parameters)
 True
 
