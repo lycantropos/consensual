@@ -104,7 +104,7 @@ Usage
 >>> async def run() -> None:
 ...     return [await node.solo(),
 ...             await node.attach_nodes([other_node.url]),
-...             await sleep(heartbeat),
+...             await sleep(4 * heartbeat),
 ...             await other_node.enqueue('dummy', 42),
 ...             await other_node.detach_nodes([node.url]),
 ...             await sleep(4 * heartbeat),
