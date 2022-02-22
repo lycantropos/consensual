@@ -233,8 +233,8 @@ def to_logger(name: str,
                       'stream': sys.stdout}
     handlers = {'stderr': stderr_handler,
                 'stdout': stdout_handler}
-    loggers = {name: {'level': logging.DEBUG,
-                      'handlers': ('stderr', 'stdout')}}
+    loggers = {name: {'level': logging.INFO,
+                      'handlers': ['stderr', 'stdout']}}
     config = {'disable_existing_loggers': False,
               'filters': {'stdout': {'()': FilterRecordsWithGreaterLevel,
                                      'max_level': logging.WARNING}},
