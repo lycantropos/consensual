@@ -116,3 +116,6 @@ steps:
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: $(TWINE_PASSWORD)
+  - ${{ if or(ne(variables['python.version'], '3.7'), startsWith(variables['Build.SourceBranch'], 'refs/tags/')) }}:
+    - bash: printenv
+      displayName: 'Print environment'
