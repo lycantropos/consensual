@@ -327,6 +327,7 @@ class Node:
             assert self._role.kind is not RoleKind.LEADER
             return LogReply(status=LogStatus.UNGOVERNABLE)
         elif self._role.kind is not RoleKind.LEADER:
+            assert self._role.leader_node_id != self._id
             assert self._role.kind is RoleKind.FOLLOWER
             try:
                 return await wait_for(
