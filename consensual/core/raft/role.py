@@ -30,7 +30,7 @@ class Candidate:
 
     @property
     def kind(self) -> RoleKind:
-        return RoleKind.FOLLOWER
+        return RoleKind.CANDIDATE
 
     @property
     def leader_node_id(self) -> Optional[NodeId]:
