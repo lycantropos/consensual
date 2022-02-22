@@ -145,8 +145,9 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @invariant()
     def term_monotonicity(self) -> None:
-        assert all(node.new_node_state.term >= node.old_node_state.term
-                   or is_resetted_node(node)
+        assert all(implication(not is_resetted_node(node),
+                               node.new_node_state.term
+                               >= node.old_node_state.term)
                    for node in self.nodes)
 
     running_nodes = Bundle('running_nodes')
