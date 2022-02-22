@@ -25,6 +25,7 @@ from .raft_cluster_node import (RaftClusterNode,
                                 is_resetted_node)
 from .raft_communication import RaftCommunication
 from .utils import (MAX_RUNNING_NODES_COUNT,
+                    equivalence,
                     implication,
                     transpose)
 
@@ -133,6 +134,14 @@ class RaftNetwork(RuleBasedStateMachine):
                 for cluster_leaders_counts in clusters_leaders_counts.values()
                 for leaders_count in cluster_leaders_counts.values()
         )
+
+    @invariant()
+    def roles_completeness(self) -> None:
+        assert all(equivalence(node_state.leader_node_id == node_state.id,
+                               node_state.role_kind is RoleKind.LEADER)
+                   for node in self.nodes
+                   for node_state in [node.new_node_state,
+                                      node.old_node_state])
 
     @invariant()
     def term_monotonicity(self) -> None:
