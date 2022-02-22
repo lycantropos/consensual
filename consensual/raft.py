@@ -3,7 +3,8 @@ from .core.raft import (MessageKind,
                         Processor,
                         Receiver,
                         ReceiverUnavailable,
-                        Sender)
+                        Sender,
+                        communication)
 
 MessageKind = MessageKind
 Node = Node
@@ -11,3 +12,4 @@ Processor = Processor
 Receiver = Receiver
 ReceiverUnavailable = ReceiverUnavailable
 Sender = Sender
+plain = communication
