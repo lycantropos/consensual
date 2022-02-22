@@ -222,33 +222,25 @@ def to_logger(name: str,
               version: int = 1) -> logging.Logger:
     console_formatter = {'format': '[%(levelname)-8s %(name)s] %(msg)s'}
     formatters = {'console': console_formatter}
-    stderr_handler_config = {
-        'class': 'logging.StreamHandler',
-        'level': logging.WARNING,
-        'formatter': 'console',
-        'stream': sys.stderr,
-    }
-    stdout_handler_config = {
-        'class': 'logging.StreamHandler',
-        'level': logging.DEBUG,
-        'formatter': 'console',
-        'stream': sys.stdout,
-        'filters': ['stdout']
-    }
-    handlers = {'stdout': stdout_handler_config,
-                'stderr': stderr_handler_config}
+    stderr_handler = {'class': 'logging.StreamHandler',
+                      'formatter': 'console',
+                      'level': logging.WARNING,
+                      'stream': sys.stderr}
+    stdout_handler = {'class': 'logging.StreamHandler',
+                      'filters': ['stdout'],
+                      'formatter': 'console',
+                      'level': logging.DEBUG,
+                      'stream': sys.stdout}
+    handlers = {'stderr': stderr_handler,
+                'stdout': stdout_handler}
     loggers = {name: {'level': logging.DEBUG,
                       'handlers': ('stderr', 'stdout')}}
-    config = {'formatters': formatters,
+    config = {'disable_existing_loggers': False,
+              'filters': {'stdout': {'()': FilterRecordsWithGreaterLevel,
+                                     'max_level': logging.WARNING}},
+              'formatters': formatters,
               'handlers': handlers,
               'loggers': loggers,
-              'version': version,
-              'filters': {
-                  'stdout': {
-                      '()': FilterRecordsWithGreaterLevel,
-                      'max_level': logging.WARNING,
-                  }
-              },
-              'disable_existing_loggers': False}
+              'version': version}
     logging.config.dictConfig(config)
     return logging.getLogger(name)
