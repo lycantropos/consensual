@@ -99,17 +99,17 @@ Usage
 >>> other_receiver = communication.Receiver(other_node, nodes)
 >>> receiver.start()
 >>> other_receiver.start()
+>>> from asyncio import get_event_loop, sleep
 >>> def assert_is_none(value: Optional[Any]) -> None:
 ...     assert value is None, value
 >>> async def run() -> None:
 ...     assert_is_none(await node.solo())
-...     assert_is_none(await node.attach_nodes([other_node.url]))
 ...     assert_is_none(await node.enqueue('dummy', 42))
-...     assert_is_none(await other_node.detach_nodes([node.url]))
+...     assert_is_none(await node.attach_nodes([other_node.url]))
+...     await sleep(10 * heartbeat)
+...     assert_is_none(await node.detach_nodes([other_node.url]))
+...     assert_is_none(await node.enqueue('dummy', 42))
 ...     assert_is_none(await node.detach())
-...     assert_is_none(await other_node.attach_nodes([node.url]))
-...     assert_is_none(await other_node.enqueue('dummy', 42))
->>> from asyncio import get_event_loop
 >>> loop = get_event_loop()
 >>> loop.run_until_complete(run())
 >>> receiver.stop()
