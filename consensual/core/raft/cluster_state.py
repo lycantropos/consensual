@@ -85,7 +85,7 @@ class DisjointClusterState:
                 'stable': self.stable}
 
     def has_majority(self, nodes_ids: Collection[NodeId]) -> bool:
-        return (len(set(nodes_ids) & set(self.nodes_ids))
+        return (len(frozenset(nodes_ids) & frozenset(self.nodes_ids))
                 >= ceil_division(len(self.nodes_ids) + 1, 2))
 
     def stabilize(self) -> 'DisjointClusterState':
