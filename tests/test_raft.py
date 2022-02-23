@@ -8,6 +8,7 @@ from typing import (Any,
                     List,
                     Sequence,
                     Tuple)
+from weakref import WeakValueDictionary
 
 from hypothesis.stateful import (Bundle,
                                  RuleBasedStateMachine,
@@ -34,7 +35,7 @@ class RaftNetwork(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
         self.loop = get_event_loop()
-        self._raw_nodes = {}
+        self._raw_nodes = WeakValueDictionary()
         self.communication = RaftCommunication(self._raw_nodes)
         self._nodes: List[RaftClusterNode] = []
 
