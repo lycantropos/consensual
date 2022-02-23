@@ -287,7 +287,13 @@ class Node:
 
     async def _call_sync(self, node_id: NodeId) -> SyncReply:
         assert self._role.kind is RoleKind.LEADER
-        prefix_length = self._history.sent_lengths[node_id]
+        try:
+            prefix_length = self._history.sent_lengths[node_id]
+        except KeyError:
+            return SyncReply(accepted_length=0,
+                             node_id=node_id,
+                             status=SyncStatus.UNAVAILABLE,
+                             term=self._role.term)
         call = SyncCall(cluster_id=self._cluster_state.id,
                         commit_length=self._commit_length,
                         node_id=self._id,
