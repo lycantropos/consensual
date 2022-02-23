@@ -99,7 +99,7 @@ Usage
 >>> other_receiver = communication.Receiver(other_node, nodes)
 >>> receiver.start()
 >>> other_receiver.start()
->>> from asyncio import get_event_loop, sleep
+>>> from asyncio import get_event_loop
 >>> async def run() -> None:
 ...     return [await node.solo(),
 ...             await node.enqueue('dummy', 42),
