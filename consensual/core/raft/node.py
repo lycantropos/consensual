@@ -351,7 +351,7 @@ class Node:
                           Record(cluster_id=self._cluster_state.id,
                                  command=call.command,
                                  term=self._role.term))
-            await self._sync_followers_once()
+            self._restart_sync_timer()
             return LogReply(status=LogStatus.SUCCEED)
 
     async def _receive_sync_call(self, call: SyncCall) -> SyncReply:
