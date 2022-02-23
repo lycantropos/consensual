@@ -524,7 +524,7 @@ class Node:
                 self._detach()
         elif (reply.term == self._role.term
               and reply.status is VoteStatus.SUPPORTS):
-            self._role.supporters_nodes_ids.add(reply.node_id)
+            self._role = self._role.supported_by(reply.node_id)
             if self._cluster_state.has_majority(
                     self._role.supporters_nodes_ids):
                 self._lead()
