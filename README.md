@@ -123,7 +123,7 @@ True
 
 We can also replace builtin `consensual.raft.communication` communication layer
 with another one (like [`consensual_http`](https://pypi.org/project/consensual-http/)
-which is built on top of HTTP) and usage patterns may change too.
+which is built on top of HTTP), usage patterns may change as a result.
 
 Development
 -----------
