@@ -827,14 +827,18 @@ class Node:
                                        self._external_processors)
 
     def _try_commit(self) -> None:
-        while (self._role.kind is RoleKind.LEADER
-               and self._commit_length < len(self._history.log)
+        assert self._role.kind is RoleKind.LEADER
+        next_commit_length = self._commit_length
+        while (next_commit_length < len(self._history.log)
                and self._cluster_state.has_majority(
                         to_nodes_ids_that_accepted_more_records(
-                                self._history, self._commit_length
+                                self._history, next_commit_length
                         )
                 )):
-            self._commit([self._history.log[self._commit_length]])
+            next_commit_length += 1
+        if next_commit_length > self._commit_length:
+            self._commit(self._history.log[self._commit_length
+                                           :next_commit_length])
 
     def _update_cluster_state(self, cluster_state: ClusterState) -> None:
         self._sender.urls = cluster_state.nodes_urls.values()
