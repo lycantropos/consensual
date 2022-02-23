@@ -1,8 +1,6 @@
-import string
 import time
 from asyncio import (get_event_loop,
                      sleep)
-from operator import add
 from typing import (Any,
                     List,
                     Tuple)
@@ -34,26 +32,7 @@ def waiting_processor(parameters: float) -> None:
     time.sleep(parameters)
 
 
-plain_paths_letters = strategies.characters(
-        whitelist_categories=['Ll', 'Lu', 'Nd', 'Nl', 'No']
-)
-paths_infixes_letters = plain_paths_letters | strategies.sampled_from(
-        string.whitespace + '!"#$&\'()*+,-./:;<=>?@[\\]^_`|~')
-paths_infixes = strategies.text(paths_infixes_letters,
-                                min_size=1)
-
-
-def to_longer_actions(strategy: SearchStrategy[str]) -> SearchStrategy[str]:
-    return strategies.builds(add, strategy, paths_infixes)
-
-
-plain_actions = strategies.text(plain_paths_letters,
-                                min_size=1)
-actions = (plain_actions
-           | strategies.builds(add,
-                               strategies.recursive(plain_actions,
-                                                    to_longer_actions),
-                               plain_actions))
+actions = strategies.text(min_size=1)
 processors_parameters = {waiting_processor: strategies.floats(-1, 1),
                          asyncio_waiting_processor: strategies.floats(-1, 1)}
 processors = strategies.sampled_from(list(processors_parameters))
