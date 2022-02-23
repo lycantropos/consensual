@@ -100,6 +100,7 @@ Usage
 >>> receiver.start()
 >>> other_receiver.start()
 >>> from asyncio import get_event_loop
+>>> loop = get_event_loop()
 >>> async def run() -> List[Optional[str]]:
 ...     return [await node.solo(),
 ...             await node.enqueue('dummy', 42),
@@ -109,7 +110,6 @@ Usage
 ...             await other_node.solo(),
 ...             await other_node.detach(),
 ...             await other_node.detach()]
->>> loop = get_event_loop()
 >>> error_messages = loop.run_until_complete(run())
 >>> receiver.stop()
 >>> other_receiver.stop()
