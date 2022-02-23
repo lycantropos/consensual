@@ -100,22 +100,22 @@ Usage
 >>> receiver.start()
 >>> other_receiver.start()
 >>> from asyncio import get_event_loop, sleep
->>> def assert_is_none(value: Optional[Any]) -> None:
-...     assert value is None, value
 >>> async def run() -> None:
-...     assert_is_none(await node.solo())
-...     assert_is_none(await node.enqueue('dummy', 42))
-...     assert_is_none(await node.attach_nodes([other_node.url]))
-...     await sleep(10 * heartbeat)
-...     assert_is_none(await other_node.enqueue('dummy', 42))
-...     assert_is_none(await other_node.detach_nodes([other_node.url]))
-...     assert_is_none(await other_node.solo())
-...     assert_is_none(await other_node.detach())
-...     assert_is_none(await other_node.detach())
+...     return [await node.solo(),
+...             await node.enqueue('dummy', 42),
+...             await node.attach_nodes([other_node.url]),
+...             await node.enqueue('dummy', 42),
+...             await other_node.detach_nodes([node.url]),
+...             await other_node.solo(),
+...             await other_node.detach(),
+...             await other_node.detach()]
 >>> loop = get_event_loop()
->>> loop.run_until_complete(run())
+>>> error_messages = loop.run_until_complete(run())
 >>> receiver.stop()
 >>> other_receiver.stop()
+>>> all(error_message is None or isinstance(error_message, str)
+...     for error_message in error_messages)
+True
 >>> all(parameters == 42 for parameters in processed_parameters)
 True
 
