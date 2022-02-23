@@ -79,7 +79,7 @@ Usage
 ...                            host='localhost',
 ...                            port=6001)
 >>> heartbeat = 0.1
->>> from typing import Any, Optional
+>>> from typing import Any, List, Optional
 >>> processed_parameters = []
 >>> def dummy_processor(parameters: Any) -> None:
 ...     processed_parameters.append(parameters)
@@ -100,7 +100,7 @@ Usage
 >>> receiver.start()
 >>> other_receiver.start()
 >>> from asyncio import get_event_loop
->>> async def run() -> None:
+>>> async def run() -> List[Optional[str]]:
 ...     return [await node.solo(),
 ...             await node.enqueue('dummy', 42),
 ...             await node.attach_nodes([other_node.url]),
