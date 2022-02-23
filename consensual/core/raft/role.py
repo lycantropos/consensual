@@ -118,10 +118,3 @@ class Leader:
 
 
 Role = Union[Candidate, Follower, Leader]
-
-
-def update_nodes_ids(role: Role, nodes_ids: Collection[NodeId]) -> None:
-    if (role.kind is not RoleKind.LEADER
-            and role.leader_node_id is not None
-            and role.leader_node_id not in nodes_ids):
-        role.leader_node_id = None

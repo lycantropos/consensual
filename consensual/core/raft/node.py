@@ -60,8 +60,7 @@ from .role import (Candidate,
                    Follower,
                    Leader,
                    Role,
-                   RoleKind,
-                   update_nodes_ids)
+                   RoleKind)
 from .sender import (ReceiverUnavailable,
                      Sender)
 from .utils import (host_to_ip_address,
@@ -695,6 +694,7 @@ class Node:
                           f'in term {self._role.term}')
         self._history = self._history.to_regular()
         self._role = Follower(leader_node_id=leader_node_id,
+                              supported_node_id=self._role.supported_node_id,
                               term=self._role.term)
         self._cancel_election_timer()
 
@@ -836,14 +836,17 @@ class Node:
 
     def _update_cluster_state(self, cluster_state: ClusterState) -> None:
         self._sender.urls = cluster_state.nodes_urls.values()
+        self._update_history(cluster_state.nodes_ids)
         self._update_latencies(cluster_state.nodes_ids)
-        update_nodes_ids(self._role, cluster_state.nodes_ids)
-        self._history = self._history.with_nodes_ids(
-                set(cluster_state.nodes_ids) | {self._id}
-                if self._role.kind is RoleKind.LEADER
-                else cluster_state.nodes_ids
-        )
+        self._update_role(cluster_state.nodes_ids)
         self._cluster_state = cluster_state
+
+    def _update_history(self, nodes_ids: Collection[NodeId]) -> None:
+        self._history = self._history.with_nodes_ids(
+                set(nodes_ids) | {self._id}
+                if self._role.kind is RoleKind.LEADER
+                else nodes_ids
+        )
 
     def _update_latencies(self, new_nodes_ids: Collection[NodeId]) -> None:
         new_nodes_ids, old_nodes_ids = (set(new_nodes_ids),
@@ -853,6 +856,15 @@ class Node:
         for added_node_id in new_nodes_ids - old_nodes_ids:
             self._latencies[added_node_id] = deque([0],
                                                    maxlen=10)
+
+    def _update_role(self, nodes_ids: Collection[NodeId]) -> None:
+        if (self._role.kind is not RoleKind.LEADER
+                and self._role.leader_node_id is not None
+                and self._role.leader_node_id not in nodes_ids):
+            self._role = Follower(
+                    supported_node_id=self._role.supported_node_id,
+                    term=self._role.term
+            )
 
     def _withdraw(self, term: Term) -> None:
         self._history = self._history.to_regular()
