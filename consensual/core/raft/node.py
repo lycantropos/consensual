@@ -492,7 +492,7 @@ class Node:
                 and (self._role.supported_node_id is None
                      or self._role.supported_node_id == call.node_id)):
             assert self._role.kind is not RoleKind.LEADER
-            self._role.supported_node_id = call.node_id
+            self._role = self._role.support(call.node_id)
             return VoteReply(node_id=self._id,
                              status=VoteStatus.SUPPORTS,
                              term=self._role.term)
@@ -517,9 +517,10 @@ class Node:
             ), (
                 self._cluster_state
             )
-            self._role.rejectors_nodes_ids.add(reply.node_id)
+            self._role = self._role.rejected_by(reply.node_id)
             if self._cluster_state.new.has_majority(
-                    self._role.rejectors_nodes_ids):
+                    self._role.rejectors_nodes_ids
+            ):
                 self._detach()
         elif (reply.term == self._role.term
               and reply.status is VoteStatus.SUPPORTS):
@@ -711,7 +712,7 @@ class Node:
 
     def _nominate(self) -> None:
         self._history = self._history.to_regular()
-        self._role = Candidate(self._role.term + 1)
+        self._role = Candidate(term=self._role.term + 1)
 
     def _process_commands(self,
                           commands: List[Command],

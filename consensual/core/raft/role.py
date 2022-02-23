@@ -1,6 +1,5 @@
 import enum
-from typing import (Collection,
-                    MutableSet,
+from typing import (AbstractSet,
                     Optional,
                     Union)
 
@@ -17,14 +16,19 @@ class RoleKind(enum.IntEnum):
 
 
 class Candidate:
-    __slots__ = ('_rejectors_nodes_ids', 'supported_node_id',
+    __slots__ = ('_rejectors_nodes_ids', '_supported_node_id',
                  '_supporters_nodes_ids', '_term')
 
-    def __init__(self, term: Term) -> None:
+    def __init__(self,
+                 *,
+                 rejectors_nodes_ids: AbstractSet[NodeId] = frozenset(),
+                 supported_node_id: Optional[NodeId] = None,
+                 supporters_nodes_ids: AbstractSet[NodeId] = frozenset(),
+                 term: Term) -> None:
         (
-            self._rejectors_nodes_ids, self.supported_node_id,
+            self._rejectors_nodes_ids, self._supported_node_id,
             self._supporters_nodes_ids, self._term
-        ) = set(), None, set(), term
+        ) = rejectors_nodes_ids, supported_node_id, supporters_nodes_ids, term
 
     __repr__ = generate_repr(__init__)
 
@@ -37,27 +41,53 @@ class Candidate:
         return None
 
     @property
-    def rejectors_nodes_ids(self) -> MutableSet[NodeId]:
+    def supported_node_id(self) -> Optional[NodeId]:
+        return self._supported_node_id
+
+    @property
+    def rejectors_nodes_ids(self) -> AbstractSet[NodeId]:
         return self._rejectors_nodes_ids
 
     @property
-    def supporters_nodes_ids(self) -> MutableSet[NodeId]:
+    def supporters_nodes_ids(self) -> AbstractSet[NodeId]:
         return self._supporters_nodes_ids
 
     @property
     def term(self) -> Term:
         return self._term
 
+    def rejected_by(self, node_id: NodeId) -> 'Candidate':
+        return Candidate(
+                rejectors_nodes_ids=self.rejectors_nodes_ids | {node_id},
+                supported_node_id=self.supported_node_id,
+                supporters_nodes_ids=self.supporters_nodes_ids,
+                term=self.term
+        )
+
+    def support(self, node_id: NodeId) -> 'Candidate':
+        return Candidate(rejectors_nodes_ids=self.rejectors_nodes_ids,
+                         supported_node_id=node_id,
+                         supporters_nodes_ids=self.supporters_nodes_ids,
+                         term=self.term)
+
+    def supported_by(self, node_id: NodeId) -> 'Candidate':
+        return Candidate(
+                rejectors_nodes_ids=self.rejectors_nodes_ids,
+                supported_node_id=self.supported_node_id,
+                supporters_nodes_ids=self.supporters_nodes_ids | {node_id},
+                term=self.term
+        )
+
 
 class Follower:
-    __slots__ = '_leader_node_id', 'supported_node_id', '_term'
+    __slots__ = '_leader_node_id', '_supported_node_id', '_term'
 
     def __init__(self,
                  *,
                  leader_node_id: Optional[NodeId] = None,
                  supported_node_id: Optional[NodeId] = None,
                  term: Term) -> None:
-        self._leader_node_id, self.supported_node_id, self._term = (
+        self._leader_node_id, self._supported_node_id, self._term = (
             leader_node_id, supported_node_id, term
         )
 
@@ -71,19 +101,18 @@ class Follower:
     def leader_node_id(self) -> Optional[NodeId]:
         return self._leader_node_id
 
-    @leader_node_id.setter
-    def leader_node_id(self, value: Optional[NodeId]) -> None:
-        assert value is None
-        self._leader_node_id = value
+    @property
+    def supported_node_id(self) -> Optional[NodeId]:
+        return self._supported_node_id
 
     @property
     def term(self) -> Term:
         return self._term
 
-    @term.setter
-    def term(self, value: Term) -> None:
-        self.leader_node_id = None
-        self._term = value
+    def support(self, node_id: NodeId) -> 'Follower':
+        assert self.leader_node_id is None
+        return Follower(supported_node_id=node_id,
+                        term=self.term)
 
 
 class Leader:
