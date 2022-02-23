@@ -3,7 +3,7 @@ from typing import (List,
                     TypeVar,
                     overload)
 
-MAX_RUNNING_NODES_COUNT = 10
+MAX_NODES_COUNT = 10
 
 
 def equivalence(left: bool, right: bool) -> bool:

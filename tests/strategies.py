@@ -11,7 +11,7 @@ from yarl import URL
 
 from consensual.raft import Processor
 from .raft_cluster_node import RaftClusterNode
-from .utils import MAX_RUNNING_NODES_COUNT
+from .utils import MAX_NODES_COUNT
 
 data_objects = strategies.data()
 heartbeats = strategies.floats(1, 2)
@@ -47,7 +47,7 @@ running_nodes_parameters = strategies.tuples(urls, processors_dicts,
 running_nodes_parameters_lists = strategies.lists(
         running_nodes_parameters,
         min_size=1,
-        max_size=MAX_RUNNING_NODES_COUNT
+        max_size=MAX_NODES_COUNT
 )
 
 
