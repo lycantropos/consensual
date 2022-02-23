@@ -555,18 +555,18 @@ class Node:
             await sleep(self._election_duration - duration)
 
     async def _send_json(self,
-                         receiver: NodeId,
+                         node_id: NodeId,
                          kind: MessageKind,
                          message: Dict[str, Any]) -> Dict[str, Any]:
-        if receiver == self._id:
+        if node_id == self._id:
             return await self.receive(kind=kind,
                                       message=message)
-        latencies = self._latencies[receiver]
-        receiver_url = self._cluster_state.nodes_urls[receiver]
+        latencies = self._latencies[node_id]
+        node_url = self._cluster_state.nodes_urls[node_id]
         message_start = self._to_time()
         result = await self._sender.send(kind=kind,
                                          message=message,
-                                         url=receiver_url)
+                                         url=node_url)
         reply_end = self._to_time()
         latency = reply_end - message_start
         latencies.append(latency)
