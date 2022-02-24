@@ -1,6 +1,7 @@
 import logging.config
 import sys
-from asyncio import AbstractEventLoop
+from asyncio import (AbstractEventLoop,
+                     new_event_loop)
 from contextlib import contextmanager
 from typing import (Any,
                     Dict,
@@ -61,7 +62,7 @@ class RaftClusterNode:
             heartbeat, processors, random_seed, url
         )
         self._communication = communication
-        self._loop = loop
+        self._loop = new_event_loop()
         self._logger = to_logger(self.url.authority)
         self.raw = self._to_raw()
         self._receiver = self._communication.to_receiver(self.raw)
@@ -153,8 +154,10 @@ class RaftClusterNode:
             return await self.raw.solo()
 
     def restart(self) -> bool:
+        assert self.loop is None
         assert self.raw is None
         assert self._receiver is None
+        self._loop = new_event_loop()
         self.raw = self._to_raw()
         self._receiver = self._communication.to_receiver(self.raw)
         return self.start()
@@ -168,6 +171,8 @@ class RaftClusterNode:
         return True
 
     def stop(self) -> None:
+        self._loop.close()
+        self._loop = None
         self._new_cluster_state = self._old_cluster_state = None
         self._new_node_state = self._old_node_state = None
         self._receiver.stop()
