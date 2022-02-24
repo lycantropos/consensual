@@ -56,7 +56,6 @@ class RaftClusterNode:
                  random_seed: int,
                  *,
                  communication: RaftCommunication,
-                 loop: AbstractEventLoop,
                  heartbeat: float) -> None:
         self.heartbeat, self.processors, self.random_seed, self.url = (
             heartbeat, processors, random_seed, url

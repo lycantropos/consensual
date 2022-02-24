@@ -170,8 +170,8 @@ class RaftNetwork(RuleBasedStateMachine):
     def add_nodes(self,
                   target_node: RaftClusterNode,
                   source_node: RaftClusterNode) -> None:
-        self.loop.run_until_complete(self._attach_node(target_node,
-                                                       source_node))
+        target_node.loop.run_until_complete(self._attach_node(target_node,
+                                                              source_node))
 
     def is_not_full(self) -> bool:
         return (len(self.active_nodes)
@@ -190,8 +190,7 @@ class RaftNetwork(RuleBasedStateMachine):
         nodes_parameters = nodes_parameters[:max_new_nodes_count]
         nodes = list(map(partial(RaftClusterNode,
                                  communication=self.communication,
-                                 heartbeat=heartbeat,
-                                 loop=self.loop),
+                                 heartbeat=heartbeat),
                          *transpose(nodes_parameters)))
         succeeded = [node.start() for node in nodes]
         nodes = [node for node, success in zip(nodes, succeeded) if success]
@@ -200,22 +199,22 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @rule(node=running_nodes)
     def detach_node(self, node: RaftClusterNode) -> None:
-        self.loop.run_until_complete(self._detach(node))
+        node.loop.run_until_complete(self._detach(node))
 
     @rule(source_node=running_nodes,
           target_node=running_nodes)
     def detach_nodes(self,
                      source_node: RaftClusterNode,
                      target_node: RaftClusterNode) -> None:
-        self.loop.run_until_complete(self._detach_nodes(source_node,
-                                                        target_node))
+        target_node.loop.run_until_complete(self._detach_nodes(source_node,
+                                                               target_node))
 
     @rule(data=strategies.data_objects,
           node=running_nodes)
     def log(self, data: DataObject, node: RaftClusterNode) -> None:
         arguments = data.draw(strategies.to_log_arguments_lists(node))
         for action, parameters in arguments:
-            self.loop.run_until_complete(self._enqueue(node, action,
+            node.loop.run_until_complete(self._enqueue(node, action,
                                                        parameters))
 
     @rule(target=running_nodes,
@@ -241,7 +240,7 @@ class RaftNetwork(RuleBasedStateMachine):
 
     @rule(node=running_nodes)
     def solo_nodes(self, node: RaftClusterNode) -> None:
-        self.loop.run_until_complete(self._solo(node))
+        node.loop.run_until_complete(self._solo(node))
 
     def teardown(self) -> None:
         for node in self.active_nodes:
