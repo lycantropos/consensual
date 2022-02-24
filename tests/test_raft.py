@@ -1,4 +1,3 @@
-from asyncio import get_event_loop
 from collections import (Counter,
                          defaultdict)
 from functools import partial
@@ -34,7 +33,6 @@ from .utils import (MAX_NODES_COUNT,
 class RaftNetwork(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
-        self.loop = get_event_loop()
         self._raw_nodes = WeakValueDictionary()
         self.communication = RaftCommunication(self._raw_nodes)
         self._active_nodes: List[RaftClusterNode] = []
