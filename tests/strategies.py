@@ -14,8 +14,7 @@ from .raft_cluster_node import RaftClusterNode
 from .utils import MAX_NODES_COUNT
 
 data_objects = strategies.data()
-heartbeats = strategies.floats(1, 2)
-delays = strategies.floats(0, 1)
+heartbeats = strategies.floats(1, 5)
 hosts = strategies.just('localhost')
 ports = strategies.integers(4000, 4999)
 random_seeds = strategies.integers()
