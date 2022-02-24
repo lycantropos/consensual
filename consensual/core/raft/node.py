@@ -124,9 +124,9 @@ class Node:
             self._role, self._sender
         ) = _cluster_state, 0, _history, _id, _role, sender
         self._url = self._cluster_state.nodes_urls[self._id]
-        self._latencies = {receiver: deque([0],
-                                           maxlen=10)
-                           for receiver in self._cluster_state.nodes_ids}
+        self._latencies = {node_id: deque([0],
+                                          maxlen=10)
+                           for node_id in self._cluster_state.nodes_ids}
         self._logger = logger
         self._loop = loop
         self._external_commands_loop = event_loops.setdefault(
