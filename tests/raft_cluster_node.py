@@ -3,6 +3,8 @@ import sys
 from asyncio import (AbstractEventLoop,
                      new_event_loop)
 from contextlib import contextmanager
+from functools import partial
+from random import Random
 from typing import (Any,
                     Dict,
                     List,
@@ -61,6 +63,9 @@ class RaftClusterNode:
             heartbeat, processors, random_seed, url
         )
         self._communication = communication
+        self._random_latency_generator = partial(
+                Random(self.random_seed).uniform, 0, self.heartbeat
+        )
         self._loop = new_event_loop()
         self._logger = to_logger(self.url.authority)
         self.raw = self._to_raw()
@@ -185,7 +190,10 @@ class RaftClusterNode:
                 loop=self._loop,
                 processors=self.processors,
                 heartbeat=self.heartbeat,
-                sender=self._communication.to_sender([self.url])
+                sender=self._communication.to_sender(
+                        [self.url],
+                        random_latency_generator=self._random_latency_generator
+                )
         )
 
     @contextmanager
