@@ -30,25 +30,35 @@ class WrappedNode(Node):
         self.processed_external_commands = []
         self.processed_internal_commands = []
 
+    def _trigger_commands(self, commands: List[Command]) -> None:
+        super()._trigger_commands(
+                [Command(action=command.action,
+                         internal=command.internal,
+                         parameters=(command.parameters,
+                                     self.processed_external_commands
+                                     if command.external
+                                     else self.processed_internal_commands))
+                 for command in commands]
+        )
+
     def _process_commands(self,
                           commands: List[Command],
                           processors: Mapping[str, Processor]) -> None:
         assert all(command.external is commands[0].external
                    for command in commands)
-        processed_commands = ((self.processed_external_commands
-                               if commands[0].external
-                               else self.processed_internal_commands)
-                              if commands
-                              else None)
-        super()._process_commands(commands, processors)
-        if not commands:
-            return
-        processed_commands += commands
+        original_commands = [Command(action=command.action,
+                                     internal=command.internal,
+                                     parameters=command.parameters[0])
+                             for command in commands]
+        super()._process_commands(original_commands, processors)
+        for command, original_command in zip(commands, original_commands):
+            command.parameters[1].append(original_command)
 
     def _reset(self) -> None:
+        self.processed_external_commands, self.processed_internal_commands = (
+            [], []
+        )
         super()._reset()
-        self.processed_external_commands = []
-        self.processed_internal_commands = []
 
 
 class RaftClusterNode:
