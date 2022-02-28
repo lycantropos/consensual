@@ -88,10 +88,10 @@ class RaftClusterNode:
     @property
     def cluster_state(self) -> RaftClusterState:
         raw = self.raw
-        return RaftClusterState(raw._cluster_state.id,
-                                heartbeat=raw._cluster_state.heartbeat,
-                                nodes_ids=list(raw._cluster_state.nodes_ids),
-                                stable=raw._cluster_state.stable)
+        return RaftClusterState(raw._cluster.id,
+                                heartbeat=raw._cluster.heartbeat,
+                                nodes_ids=list(raw._cluster.nodes_ids),
+                                stable=raw._cluster.stable)
 
     @property
     def communication(self) -> RaftCommunication:
