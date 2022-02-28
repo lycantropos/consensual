@@ -12,7 +12,8 @@ from asyncio import (AbstractEventLoop,
                      set_event_loop,
                      sleep,
                      wait_for)
-from collections import deque
+from collections import (defaultdict,
+                         deque)
 from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from typing import (Any,
@@ -76,7 +77,7 @@ class InternalAction:
     assert STABILIZE_CLUSTER and not STABILIZE_CLUSTER.startswith('/')
 
 
-event_loops: Dict[int, AbstractEventLoop] = {}
+event_loops: Dict[int, AbstractEventLoop] = defaultdict(new_event_loop)
 
 
 class Node:
@@ -128,9 +129,7 @@ class Node:
                            for node_id in self._cluster.nodes_ids}
         self._logger = logger
         self._loop = loop
-        self._external_commands_loop = event_loops.setdefault(
-                threading.get_ident(), new_event_loop()
-        )
+        self._external_commands_loop = event_loops[threading.get_ident()]
         self._external_commands_executor = to_commands_executor(
                 self._external_commands_loop
         )
