@@ -26,10 +26,10 @@ from reprit import seekers
 from reprit.base import generate_repr
 from yarl import URL
 
+from .cluster import (Cluster,
+                      DisjointCluster,
+                      JointCluster)
 from .cluster_id import ClusterId
-from .cluster_state import (ClusterState,
-                            DisjointClusterState,
-                            JointClusterState)
 from .command import Command
 from .hints import (NodeId,
                     Processor,
@@ -80,7 +80,7 @@ event_loops: Dict[int, AbstractEventLoop] = {}
 
 
 class Node:
-    __slots__ = ('_cluster_state', '_commit_length', '_election_duration',
+    __slots__ = ('_cluster', '_commit_length', '_election_duration',
                  '_election_task', '_external_commands_executor',
                  '_external_commands_loop', '_external_processors', '_history',
                  '_id', '_internal_processors', '_last_heartbeat_time',
@@ -98,12 +98,11 @@ class Node:
                  processors: Optional[Mapping[str, Processor]] = None,
                  sender: Sender) -> 'Node':
         id_ = node_url_to_id(url)
-        return cls(id_, RegularHistory([]),
-                   Follower(term=0),
-                   DisjointClusterState(ClusterId(),
-                                        heartbeat=heartbeat,
-                                        nodes_urls={id_: url},
-                                        stable=False),
+        return cls(id_, RegularHistory([]), Follower(term=0),
+                   DisjointCluster(ClusterId(),
+                                   heartbeat=heartbeat,
+                                   nodes_urls={id_: url},
+                                   stable=False),
                    logger=logging.getLogger() if logger is None else logger,
                    loop=get_event_loop() if loop is None else loop,
                    processors=processors,
@@ -113,20 +112,20 @@ class Node:
                  _id: NodeId,
                  _history: History,
                  _role: Role,
-                 _cluster_state: ClusterState,
+                 _cluster: Cluster,
                  *,
                  logger: logging.Logger,
                  loop: AbstractEventLoop,
                  processors: Mapping[str, Processor],
                  sender: Sender) -> None:
         (
-            self._cluster_state, self._commit_length, self._history, self._id,
+            self._cluster, self._commit_length, self._history, self._id,
             self._role, self._sender
-        ) = _cluster_state, 0, _history, _id, _role, sender
-        self._url = self._cluster_state.nodes_urls[self._id]
+        ) = _cluster, 0, _history, _id, _role, sender
+        self._url = self._cluster.nodes_urls[self._id]
         self._latencies = {node_id: deque([0],
                                           maxlen=10)
-                           for node_id in self._cluster_state.nodes_ids}
+                           for node_id in self._cluster.nodes_ids}
         self._logger = logger
         self._loop = loop
         self._external_commands_loop = event_loops.setdefault(
@@ -144,7 +143,7 @@ class Node:
         })
         self._election_duration = 0
         self._election_task = self._loop.create_future()
-        self._last_heartbeat_time = -self._cluster_state.heartbeat
+        self._last_heartbeat_time = -self._cluster.heartbeat
         self._reelection_lag = 0
         self._reelection_task = self._loop.create_future()
         self._sync_task = self._loop.create_future()
@@ -176,22 +175,20 @@ class Node:
         nodes_urls_to_attach = {node_url_to_id(node_url): node_url
                                 for node_url in urls}
         existing_nodes_ids = (nodes_urls_to_attach.keys()
-                              & set(self._cluster_state.nodes_ids))
+                              & set(self._cluster.nodes_ids))
         if existing_nodes_ids:
             return ('already existing node(s) found: '
                     f'{itemize(existing_nodes_ids)}')
         self.logger.info(f'{self._id} initializes '
                          f'attachment of {itemize(nodes_urls_to_attach)}')
         call = UpdateCall(
-                cluster_state=DisjointClusterState(
-                        generate_cluster_id(),
-                        heartbeat=self._cluster_state.heartbeat,
-                        nodes_urls=unite_mappings(
-                                self._cluster_state.nodes_urls,
-                                nodes_urls_to_attach
-                        ),
-                        stable=False
-                ),
+                cluster=DisjointCluster(generate_cluster_id(),
+                                        heartbeat=self._cluster.heartbeat,
+                                        nodes_urls=unite_mappings(
+                                                self._cluster.nodes_urls,
+                                                nodes_urls_to_attach
+                                        ),
+                                        stable=False),
                 node_id=self._id
         )
         reply = await self._receive_update_call(call)
@@ -199,15 +196,13 @@ class Node:
 
     async def detach(self) -> Optional[str]:
         self.logger.info(f'{self._id} gets detached')
-        rest_nodes_urls = dict(self._cluster_state.nodes_urls)
+        rest_nodes_urls = dict(self._cluster.nodes_urls)
         rest_nodes_urls.pop(self._id, None)
         call = UpdateCall(
-                cluster_state=DisjointClusterState(
-                        generate_cluster_id(),
-                        heartbeat=self._cluster_state.heartbeat,
-                        nodes_urls=rest_nodes_urls,
-                        stable=False
-                ),
+                cluster=DisjointCluster(generate_cluster_id(),
+                                        heartbeat=self._cluster.heartbeat,
+                                        nodes_urls=rest_nodes_urls,
+                                        stable=False),
                 node_id=self._id
         )
         reply = await self._receive_update_call(call)
@@ -217,21 +212,19 @@ class Node:
         nodes_urls_to_detach = {node_url_to_id(node_url): node_url
                                 for node_url in urls}
         nonexistent_nodes_ids = (nodes_urls_to_detach.keys()
-                                 - set(self._cluster_state.nodes_ids))
+                                 - set(self._cluster.nodes_ids))
         if nonexistent_nodes_ids:
             return ('nonexistent node(s) found: '
                     f'{itemize(nonexistent_nodes_ids)}')
         self.logger.info(f'{self._id} initializes '
                          f'detachment of {itemize(nodes_urls_to_detach)}')
-        rest_nodes_urls = subtract_mapping(self._cluster_state.nodes_urls,
+        rest_nodes_urls = subtract_mapping(self._cluster.nodes_urls,
                                            nodes_urls_to_detach)
         call = UpdateCall(
-                cluster_state=DisjointClusterState(
-                        generate_cluster_id(),
-                        heartbeat=self._cluster_state.heartbeat,
-                        nodes_urls=rest_nodes_urls,
-                        stable=False
-                ),
+                cluster=DisjointCluster(generate_cluster_id(),
+                                        heartbeat=self._cluster.heartbeat,
+                                        nodes_urls=rest_nodes_urls,
+                                        stable=False),
                 node_id=self._id
         )
         reply = await self._receive_update_call(call)
@@ -271,12 +264,10 @@ class Node:
 
     async def solo(self) -> Optional[str]:
         self.logger.info(f'{self._id} solos')
-        self._update_cluster_state(DisjointClusterState(
-                generate_cluster_id(),
-                heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._id: self.url},
-                stable=True
-        ))
+        self._update_cluster(DisjointCluster(generate_cluster_id(),
+                                             heartbeat=self._cluster.heartbeat,
+                                             nodes_urls={self._id: self.url},
+                                             stable=True))
         self._lead()
         return None
 
@@ -293,7 +284,7 @@ class Node:
                              node_id=node_id,
                              status=SyncStatus.UNAVAILABLE,
                              term=self._role.term)
-        call = SyncCall(cluster_id=self._cluster_state.id,
+        call = SyncCall(cluster_id=self._cluster.id,
                         commit_length=self._commit_length,
                         node_id=self._id,
                         prefix_cluster_id
@@ -343,12 +334,12 @@ class Node:
                 )
             except (ReceiverUnavailable, TimeoutError):
                 return LogReply(status=LogStatus.UNAVAILABLE)
-        elif (call.node_id not in self._cluster_state.nodes_ids
+        elif (call.node_id not in self._cluster.nodes_ids
               and call.node_id != self._id):
             return LogReply(status=LogStatus.REJECTED)
         else:
             append_record(self._history,
-                          Record(cluster_id=self._cluster_state.id,
+                          Record(cluster_id=self._cluster.id,
                                  command=call.command,
                                  term=self._role.term))
             self._restart_sync_timer()
@@ -356,8 +347,8 @@ class Node:
 
     async def _receive_sync_call(self, call: SyncCall) -> SyncReply:
         self.logger.debug(f'{self._id} processes {call}')
-        clusters_agree = (self._cluster_state.id.agrees_with(call.cluster_id)
-                          if self._cluster_state.id
+        clusters_agree = (self._cluster.id.agrees_with(call.cluster_id)
+                          if self._cluster.id
                           else not self._history.log)
         if not clusters_agree:
             return SyncReply(accepted_length=0,
@@ -427,10 +418,10 @@ class Node:
 
     async def _receive_update_call(self, call: UpdateCall) -> UpdateReply:
         self.logger.debug(f'{self._id} processes {call}')
-        if (not call.cluster_state.nodes_ids
-                and len(self._cluster_state.nodes_ids) == 1
-                and self._id in self._cluster_state.nodes_ids):
-            if self._cluster_state.id:
+        if (not call.cluster.nodes_ids
+                and len(self._cluster.nodes_ids) == 1
+                and self._id in self._cluster.nodes_ids):
+            if self._cluster.id:
                 self._detach()
             else:
                 self._reset()
@@ -447,26 +438,26 @@ class Node:
                 )
             except (ReceiverUnavailable, TimeoutError):
                 return UpdateReply(status=UpdateStatus.UNAVAILABLE)
-        elif call.node_id not in self._cluster_state.nodes_ids:
+        elif call.node_id not in self._cluster.nodes_ids:
             return UpdateReply(status=UpdateStatus.REJECTED)
-        elif not self._cluster_state.stable:
+        elif not self._cluster.stable:
             return UpdateReply(status=UpdateStatus.UNSTABLE)
-        next_cluster_state = JointClusterState(old=self._cluster_state,
-                                               new=call.cluster_state)
+        next_cluster = JointCluster(old=self._cluster,
+                                    new=call.cluster)
         command = Command(action=InternalAction.SEPARATE_CLUSTERS,
-                          parameters=next_cluster_state.as_json(),
+                          parameters=next_cluster.as_json(),
                           internal=True)
         append_record(self._history,
-                      Record(cluster_id=self._cluster_state.id,
+                      Record(cluster_id=self._cluster.id,
                              command=command,
                              term=self._role.term))
-        self._update_cluster_state(next_cluster_state)
+        self._update_cluster(next_cluster)
         self._restart_sync_timer()
         return UpdateReply(status=UpdateStatus.SUCCEED)
 
     async def _receive_vote_call(self, call: VoteCall) -> VoteReply:
         self.logger.debug(f'{self._id} processes {call}')
-        if call.node_id not in self._cluster_state.nodes_ids:
+        if call.node_id not in self._cluster.nodes_ids:
             self.logger.debug(f'{self._id} skips voting '
                               f'for {call.node_id} '
                               f'because it is not in cluster state')
@@ -475,7 +466,7 @@ class Node:
                              term=self._role.term)
         elif (self._role.leader_node_id is not None
               and (self._to_time() - self._last_heartbeat_time
-                   < self._cluster_state.heartbeat)):
+                   < self._cluster.heartbeat)):
             assert self._role.kind is not RoleKind.CANDIDATE
             self.logger.debug(f'{self._id} ignores voting '
                               f'initiated by {call.node_id} '
@@ -511,23 +502,18 @@ class Node:
             pass
         elif reply.status is VoteStatus.REJECTS:
             assert (
-                    not self._cluster_state.stable
-                    and (self._id
-                         not in self._cluster_state.new.nodes_ids)
+                    not self._cluster.stable
+                    and self._id not in self._cluster.new.nodes_ids
             ), (
-                self._cluster_state
+                self._cluster
             )
             self._role = self._role.rejected_by(reply.node_id)
-            if self._cluster_state.new.has_majority(
-                    self._role.rejectors_nodes_ids
-            ):
+            if self._cluster.new.has_majority(self._role.rejectors_nodes_ids):
                 self._detach()
         elif (reply.term == self._role.term
               and reply.status is VoteStatus.SUPPORTS):
             self._role = self._role.supported_by(reply.node_id)
-            if self._cluster_state.has_majority(
-                    self._role.supporters_nodes_ids
-            ):
+            if self._cluster.has_majority(self._role.supporters_nodes_ids):
                 self._lead()
         elif reply.term > self._role.term:
             assert reply.status is VoteStatus.OPPOSES
@@ -540,11 +526,9 @@ class Node:
         start = self._to_time()
         self._nominate()
         try:
-            await wait_for(
-                    gather(*[self._agitate_voter(node_id)
-                             for node_id in self._cluster_state.nodes_ids]),
-                    self._election_duration
-            )
+            await wait_for(gather(*[self._agitate_voter(node_id)
+                                    for node_id in self._cluster.nodes_ids]),
+                           self._election_duration)
         finally:
             duration = self._to_time() - start
             self.logger.debug(f'{self._id} election '
@@ -562,7 +546,7 @@ class Node:
             return await self.receive(kind=kind,
                                       message=message)
         latencies = self._latencies[node_id]
-        node_url = self._cluster_state.nodes_urls[node_id]
+        node_url = self._cluster.nodes_urls[node_id]
         message_start = self._to_time()
         result = await self._sender.send(kind=kind,
                                          message=message,
@@ -609,12 +593,12 @@ class Node:
             await self._sync_followers_once()
             duration = self._to_time() - start
             self.logger.debug(f'{self._id} followers\' sync took {duration}s')
-            await sleep(self._cluster_state.heartbeat - duration
+            await sleep(self._cluster.heartbeat - duration
                         - self._to_expected_broadcast_time())
 
     async def _sync_followers_once(self) -> None:
         await gather(*[self._sync_follower(node_id)
-                       for node_id in self._cluster_state.nodes_ids])
+                       for node_id in self._cluster.nodes_ids])
 
     def _append_records(self,
                         prefix_length: int,
@@ -633,16 +617,13 @@ class Node:
                 if command.external:
                     continue
                 elif command.action == InternalAction.SEPARATE_CLUSTERS:
-                    cluster_state = JointClusterState.from_json(
-                            **command.parameters)
-                    self._update_cluster_state(cluster_state)
+                    cluster = JointCluster.from_json(**command.parameters)
+                    self._update_cluster(cluster)
                     break
                 else:
                     assert command.action == InternalAction.STABILIZE_CLUSTER
-                    cluster_state = DisjointClusterState.from_json(
-                            **command.parameters
-                    )
-                    self._update_cluster_state(cluster_state)
+                    cluster = DisjointCluster.from_json(**command.parameters)
+                    self._update_cluster(cluster)
                     break
             append_records(self._history, new_records)
 
@@ -668,12 +649,10 @@ class Node:
         self._cancel_reelection_timer()
         self._cancel_sync_timer()
         self._withdraw(self._role.term)
-        self._update_cluster_state(DisjointClusterState(
-                ClusterId(),
-                heartbeat=self._cluster_state.heartbeat,
-                nodes_urls={self._id: self.url},
-                stable=False
-        ))
+        self._update_cluster(DisjointCluster(ClusterId(),
+                                             heartbeat=self._cluster.heartbeat,
+                                             nodes_urls={self._id: self.url},
+                                             stable=False))
 
     def _election_timer_callback(self, future: Future) -> None:
         if future.cancelled():
@@ -702,9 +681,8 @@ class Node:
 
     def _lead(self) -> None:
         self.logger.debug(f'{self._id} is leader of term {self._role.term}')
-        self._history = SyncHistory.from_nodes_ids(
-                self._history.log, self._cluster_state.nodes_ids
-        )
+        self._history = SyncHistory.from_nodes_ids(self._history.log,
+                                                   self._cluster.nodes_ids)
         self._role = Leader(leader_node_id=self._id,
                             supported_node_id=self._role.supported_node_id,
                             term=self._role.term)
@@ -733,7 +711,7 @@ class Node:
 
     def _reset(self) -> None:
         self.logger.debug(f'{self._id} resets')
-        assert not self._cluster_state.id
+        assert not self._cluster.id
         self._commit_length = 0
         self._history.log.clear()
         self._withdraw(0)
@@ -759,28 +737,28 @@ class Node:
     def _separate_clusters(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._id} separates clusters')
         if self._role.kind is RoleKind.LEADER:
-            cluster_state = JointClusterState.from_json(**parameters)
-            if cluster_state != self._cluster_state:
+            cluster = JointCluster.from_json(**parameters)
+            if cluster != self._cluster:
                 return
             command = Command(action=InternalAction.STABILIZE_CLUSTER,
-                              parameters=cluster_state.new.as_json(),
+                              parameters=cluster.new.as_json(),
                               internal=True)
             append_record(self._history,
-                          Record(cluster_id=self._cluster_state.id,
+                          Record(cluster_id=self._cluster.id,
                                  command=command,
                                  term=self._role.term))
-            self._update_cluster_state(cluster_state.new)
+            self._update_cluster(cluster.new)
             self._restart_sync_timer()
 
     def _stabilize_cluster(self, parameters: Dict[str, Any]) -> None:
         self.logger.debug(f'{self._id} stabilizes cluster')
-        if self._cluster_state != DisjointClusterState.from_json(**parameters):
+        if self._cluster != DisjointCluster.from_json(**parameters):
             pass
-        elif self._id not in self._cluster_state.nodes_ids:
-            assert self._cluster_state.nodes_ids
+        elif self._id not in self._cluster.nodes_ids:
+            assert self._cluster.nodes_ids
             self._detach()
         else:
-            self._update_cluster_state(self._cluster_state.stabilize())
+            self._update_cluster(self._cluster.stabilize())
 
     def _start_election_timer(self) -> None:
         self._election_duration = self._to_new_duration()
@@ -801,7 +779,7 @@ class Node:
 
     def _to_new_duration(self) -> Time:
         broadcast_time = self._to_expected_broadcast_time()
-        heartbeat = self._cluster_state.heartbeat
+        heartbeat = self._cluster.heartbeat
         assert (
                 broadcast_time < heartbeat
         ), (
@@ -830,7 +808,7 @@ class Node:
         assert self._role.kind is RoleKind.LEADER
         next_commit_length = self._commit_length
         while (next_commit_length < len(self._history.log)
-               and self._cluster_state.has_majority(
+               and self._cluster.has_majority(
                         to_nodes_ids_that_accepted_more_records(
                                 self._history, next_commit_length
                         )
@@ -840,12 +818,12 @@ class Node:
             self._commit(self._history.log[self._commit_length
                                            :next_commit_length])
 
-    def _update_cluster_state(self, cluster_state: ClusterState) -> None:
-        self._sender.urls = cluster_state.nodes_urls.values()
-        self._update_history(cluster_state.nodes_ids)
-        self._update_latencies(cluster_state.nodes_ids)
-        self._update_role(cluster_state.nodes_ids)
-        self._cluster_state = cluster_state
+    def _update_cluster(self, cluster: Cluster) -> None:
+        self._sender.urls = cluster.nodes_urls.values()
+        self._update_history(cluster.nodes_ids)
+        self._update_latencies(cluster.nodes_ids)
+        self._update_role(cluster.nodes_ids)
+        self._cluster = cluster
 
     def _update_history(self, nodes_ids: Collection[NodeId]) -> None:
         self._history = self._history.with_nodes_ids(
@@ -856,7 +834,7 @@ class Node:
 
     def _update_latencies(self, new_nodes_ids: Collection[NodeId]) -> None:
         new_nodes_ids, old_nodes_ids = (set(new_nodes_ids),
-                                        set(self._cluster_state.nodes_ids))
+                                        set(self._cluster.nodes_ids))
         for removed_node_id in old_nodes_ids - new_nodes_ids:
             del self._latencies[removed_node_id]
         for added_node_id in new_nodes_ids - old_nodes_ids:

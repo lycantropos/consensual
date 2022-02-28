@@ -5,9 +5,9 @@ from typing import (Any,
 
 from reprit.base import generate_repr
 
+from .cluster import DisjointCluster
 from .cluster_id import (ClusterId,
                          RawClusterId)
-from .cluster_state import DisjointClusterState
 from .command import Command
 from .hints import (NodeId,
                     Protocol,
@@ -238,21 +238,21 @@ class SyncReply:
 
 
 class UpdateCall:
-    __slots__ = '_cluster_state', '_node_id'
+    __slots__ = '_cluster', '_node_id'
 
     def __new__(cls,
                 *,
-                cluster_state: DisjointClusterState,
+                cluster: DisjointCluster,
                 node_id: NodeId) -> 'UpdateCall':
         self = super().__new__(cls)
-        self._cluster_state, self._node_id = cluster_state, node_id
+        self._cluster, self._node_id = cluster, node_id
         return self
 
     __repr__ = generate_repr(__new__)
 
     @property
-    def cluster_state(self) -> DisjointClusterState:
-        return self._cluster_state
+    def cluster(self) -> DisjointCluster:
+        return self._cluster
 
     @property
     def node_id(self) -> NodeId:
@@ -261,15 +261,13 @@ class UpdateCall:
     @classmethod
     def from_json(cls,
                   *,
-                  cluster_state: Dict[str, Any],
+                  cluster: Dict[str, Any],
                   node_id: NodeId) -> 'UpdateCall':
-        return cls(
-                cluster_state=DisjointClusterState.from_json(**cluster_state),
-                node_id=node_id
-        )
+        return cls(cluster=DisjointCluster.from_json(**cluster),
+                   node_id=node_id)
 
     def as_json(self) -> Dict[str, Any]:
-        return {'cluster_state': self.cluster_state.as_json(),
+        return {'cluster': self.cluster.as_json(),
                 'node_id': self.node_id}
 
 

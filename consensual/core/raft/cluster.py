@@ -13,7 +13,7 @@ from .hints import (NodeId,
                     Time)
 
 
-class DisjointClusterState:
+class DisjointCluster:
     __slots__ = '_heartbeat', '_id', '_nodes_urls', '_stable'
 
     def __new__(cls,
@@ -21,7 +21,7 @@ class DisjointClusterState:
                 *,
                 heartbeat: Time,
                 nodes_urls: Mapping[NodeId, URL],
-                stable: bool) -> 'DisjointClusterState':
+                stable: bool) -> 'DisjointCluster':
         if heartbeat < 0:
             raise ValueError('heartbeat should be non-negative')
         self = super().__new__(cls)
@@ -37,7 +37,7 @@ class DisjointClusterState:
                  and self.heartbeat == other.heartbeat
                  and self.nodes_urls == other.nodes_urls
                  and self.stable is other.stable)
-                if isinstance(other, DisjointClusterState)
+                if isinstance(other, DisjointCluster)
                 else NotImplemented)
 
     @property
@@ -66,7 +66,7 @@ class DisjointClusterState:
                   heartbeat: int,
                   id_: RawClusterId,
                   nodes_urls: Dict[NodeId, str],
-                  stable: bool) -> 'DisjointClusterState':
+                  stable: bool) -> 'DisjointCluster':
         return cls(ClusterId.from_json(id_),
                    heartbeat=heartbeat,
                    nodes_urls={
@@ -88,21 +88,21 @@ class DisjointClusterState:
         return (len(frozenset(nodes_ids) & frozenset(self.nodes_ids))
                 >= ceil_division(len(self.nodes_ids) + 1, 2))
 
-    def stabilize(self) -> 'DisjointClusterState':
+    def stabilize(self) -> 'DisjointCluster':
         assert not self.stable
-        return DisjointClusterState(self.id,
-                                    heartbeat=self.heartbeat,
-                                    nodes_urls=self.nodes_urls,
-                                    stable=True)
+        return DisjointCluster(self.id,
+                               heartbeat=self.heartbeat,
+                               nodes_urls=self.nodes_urls,
+                               stable=True)
 
 
-class JointClusterState:
+class JointCluster:
     __slots__ = '_id', '_new', '_old'
 
     def __new__(cls,
                 *,
-                old: DisjointClusterState,
-                new: DisjointClusterState) -> 'JointClusterState':
+                old: DisjointCluster,
+                new: DisjointCluster) -> 'JointCluster':
         self = super().__new__(cls)
         self._id, self._new, self._old = old.id.join_with(new.id), new, old
         return self
@@ -111,7 +111,7 @@ class JointClusterState:
 
     def __eq__(self, other: Any) -> Any:
         return (self.old == other.old and self.new == other.new
-                if isinstance(other, JointClusterState)
+                if isinstance(other, JointCluster)
                 else NotImplemented)
 
     @property
@@ -123,7 +123,7 @@ class JointClusterState:
         return self._id
 
     @property
-    def new(self) -> DisjointClusterState:
+    def new(self) -> DisjointCluster:
         return self._new
 
     @property
@@ -135,7 +135,7 @@ class JointClusterState:
         return {**self.old.nodes_urls, **self.new.nodes_urls}
 
     @property
-    def old(self) -> DisjointClusterState:
+    def old(self) -> DisjointCluster:
         return self._old
 
     @property
@@ -146,9 +146,9 @@ class JointClusterState:
     def from_json(cls,
                   *,
                   old: Dict[str, Any],
-                  new: Dict[str, Any]) -> 'JointClusterState':
-        return cls(old=DisjointClusterState.from_json(**old),
-                   new=DisjointClusterState.from_json(**new))
+                  new: Dict[str, Any]) -> 'JointCluster':
+        return cls(old=DisjointCluster.from_json(**old),
+                   new=DisjointCluster.from_json(**new))
 
     def as_json(self) -> Dict[str, Any]:
         return {'old': self.old.as_json(), 'new': self.new.as_json()}
@@ -158,7 +158,7 @@ class JointClusterState:
                 and self.new.has_majority(nodes_ids))
 
 
-ClusterState = Union[DisjointClusterState, JointClusterState]
+Cluster = Union[DisjointCluster, JointCluster]
 
 
 def ceil_division(dividend: int, divisor: int) -> int:
