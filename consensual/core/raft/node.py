@@ -658,9 +658,9 @@ class Node:
 
     def _commit(self, records: Collection[Record]) -> None:
         assert records
+        self._commit_length += len(records)
         self._trigger_commands_processing([record.command
                                            for record in records])
-        self._commit_length += len(records)
 
     def _detach(self) -> None:
         self.logger.debug(f'{self._id} detaches')
