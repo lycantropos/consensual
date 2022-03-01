@@ -823,11 +823,11 @@ class Node:
         self._update_role(cluster.nodes_ids)
         self._cluster = cluster
 
-    def _update_history(self, nodes_ids: Collection[NodeId]) -> None:
+    def _update_history(self, new_nodes_ids: Collection[NodeId]) -> None:
         self._history = self._history.with_nodes_ids(
-                set(nodes_ids) | {self._id}
+                set(new_nodes_ids) | {self._id}
                 if self._role.kind is RoleKind.LEADER
-                else nodes_ids
+                else new_nodes_ids
         )
 
     def _update_latencies(self, new_nodes_ids: Collection[NodeId]) -> None:
