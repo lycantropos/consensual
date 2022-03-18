@@ -38,7 +38,7 @@ processors = strategies.sampled_from(list(processors_parameters))
 processors_dicts = strategies.dictionaries(keys=actions,
                                            values=processors)
 urls = strategies.builds(URL.build,
-                         scheme=strategies.just('htttp'),
+                         scheme=strategies.just('http'),
                          host=hosts,
                          port=ports)
 running_nodes_parameters = strategies.tuples(urls, processors_dicts,
